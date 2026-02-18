@@ -87,10 +87,10 @@ make redis-ping        # Ping no Redis
 ## Fases de Desenvolvimento
 
 - [x] **Fase 0** — Setup do projeto e infraestrutura Docker
-- [ ] **Fase 1** — Connection Pool Manager
-- [ ] **Fase 2** — Proxy TDS (Wire Protocol)
-- [ ] **Fase 3** — Coordenação Distribuída (Redis)
-- [ ] **Fase 4** — Fila de Espera e Backpressure
-- [ ] **Fase 5** — Observabilidade
-- [ ] **Fase 6** — Load Generator e Testes
-- [ ] **Fase 7** — Hardening e Documentação
+- [x] **Fase 1** — Connection Pool Manager
+- [x] **Fase 2** — Proxy TDS (Wire Protocol)
+- [x] **Fase 3** — Coordenação Distribuída (Redis)
+- [x] **Fase 4** — Fila de Espera e Backpressure
+- [x] **Fase 5** — Observabilidade
+- [x] **Fase 6** — Load Generator e Testes
+- [x] **Fase 7** — Hardening e Documentação

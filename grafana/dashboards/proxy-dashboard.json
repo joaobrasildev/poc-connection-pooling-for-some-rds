@@ -1,0 +1,220 @@
+{
+    "annotations": {
+        "list": []
+    },
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 1,
+    "id": null,
+    "links": [],
+    "panels": [
+        {
+            "title": "Active Connections per Bucket",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "proxy_connections_active",
+                    "legendFormat": "{{bucket_id}}",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "fillOpacity": 20
+                    }
+                }
+            }
+        },
+        {
+            "title": "Max vs Active Connections",
+            "type": "bargauge",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "proxy_connections_active",
+                    "legendFormat": "active - {{bucket_id}}",
+                    "refId": "A"
+                },
+                {
+                    "expr": "proxy_connections_max",
+                    "legendFormat": "max - {{bucket_id}}",
+                    "refId": "B"
+                }
+            ]
+        },
+        {
+            "title": "Queue Length per Bucket",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 8
+            },
+            "targets": [
+                {
+                    "expr": "proxy_queue_length",
+                    "legendFormat": "{{bucket_id}}",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "fillOpacity": 30
+                    }
+                }
+            }
+        },
+        {
+            "title": "Queue Wait Time (P95)",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 8
+            },
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.95, rate(proxy_queue_wait_seconds_bucket[5m]))",
+                    "legendFormat": "P95 - {{bucket_id}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "title": "Connection Errors",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 16
+            },
+            "targets": [
+                {
+                    "expr": "rate(proxy_connection_errors_total[5m])",
+                    "legendFormat": "{{bucket_id}} - {{error_type}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "title": "Instance Heartbeat",
+            "type": "stat",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 16
+            },
+            "targets": [
+                {
+                    "expr": "proxy_instance_heartbeat",
+                    "legendFormat": "{{instance_id}}",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "red",
+                                "value": 0
+                            },
+                            {
+                                "color": "green",
+                                "value": 1
+                            }
+                        ]
+                    },
+                    "mappings": [
+                        {
+                            "type": "value",
+                            "options": {
+                                "0": {
+                                    "text": "DOWN"
+                                },
+                                "1": {
+                                    "text": "UP"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "title": "Pinned Connections",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 24
+            },
+            "targets": [
+                {
+                    "expr": "proxy_connections_pinned",
+                    "legendFormat": "{{bucket_id}} ({{pin_reason}})",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "title": "Redis Operations Rate",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 24
+            },
+            "targets": [
+                {
+                    "expr": "rate(proxy_redis_operations_total[5m])",
+                    "legendFormat": "{{operation}} - {{status}}",
+                    "refId": "A"
+                }
+            ]
+        }
+    ],
+    "refresh": "5s",
+    "schemaVersion": 39,
+    "tags": [
+        "proxy",
+        "connection-pooling",
+        "sql-server"
+    ],
+    "templating": {
+        "list": []
+    },
+    "time": {
+        "from": "now-15m",
+        "to": "now"
+    },
+    "timezone": "browser",
+    "title": "Connection Pooling Proxy",
+    "uid": "connection-pooling-proxy",
+    "version": 1
+}

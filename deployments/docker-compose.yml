@@ -1,0 +1,277 @@
+# ============================================================================
+# Docker Compose — Connection Pooling Proxy POC
+# Brings up: 3x SQL Server, Redis, HAProxy, 3x Proxy instances
+# Monitoring stack (Prometheus + Grafana) in separate compose file
+# ============================================================================
+
+services:
+  # ──────────────────────────────────────────────────────────────────────────
+  # SQL Server Instances (simulating RDS buckets)
+  # ──────────────────────────────────────────────────────────────────────────
+  sqlserver-bucket-1:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    container_name: sqlserver-bucket-1
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "YourStr0ngP@ssword1"
+      MSSQL_PID: "Developer"
+      MSSQL_MEMORY_LIMIT_MB: "512"
+    ports:
+      - "14331:1433"
+    volumes:
+      - sqlserver-bucket-1-data:/var/opt/mssql
+    networks:
+      - proxy-network
+    healthcheck:
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "YourStr0ngP@ssword1" -Q "SELECT 1" -C -b || exit 1
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  sqlserver-bucket-2:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    container_name: sqlserver-bucket-2
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "YourStr0ngP@ssword2"
+      MSSQL_PID: "Developer"
+      MSSQL_MEMORY_LIMIT_MB: "512"
+    ports:
+      - "14332:1433"
+    volumes:
+      - sqlserver-bucket-2-data:/var/opt/mssql
+    networks:
+      - proxy-network
+    healthcheck:
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "YourStr0ngP@ssword2" -Q "SELECT 1" -C -b || exit 1
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  sqlserver-bucket-3:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    container_name: sqlserver-bucket-3
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "YourStr0ngP@ssword3"
+      MSSQL_PID: "Developer"
+      MSSQL_MEMORY_LIMIT_MB: "512"
+    ports:
+      - "14333:1433"
+    volumes:
+      - sqlserver-bucket-3-data:/var/opt/mssql
+    networks:
+      - proxy-network
+    healthcheck:
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "YourStr0ngP@ssword3" -Q "SELECT 1" -C -b || exit 1
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Database Initialization (runs once)
+  # ──────────────────────────────────────────────────────────────────────────
+  init-db:
+    image: mcr.microsoft.com/mssql-tools:latest
+    platform: linux/amd64
+    container_name: init-db
+    depends_on:
+      sqlserver-bucket-1:
+        condition: service_healthy
+      sqlserver-bucket-2:
+        condition: service_healthy
+      sqlserver-bucket-3:
+        condition: service_healthy
+    volumes:
+      - ../scripts:/scripts:ro
+    entrypoint: ["/bin/bash", "/scripts/wait-for-sql.sh"]
+    networks:
+      - proxy-network
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Redis (shared state for distributed coordination)
+  # ──────────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - proxy-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Proxy Instances (connection pooling proxy)
+  # ──────────────────────────────────────────────────────────────────────────
+  proxy-1:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: proxy-1
+    environment:
+      PROXY_INSTANCE_ID: "proxy-1"
+    ports:
+      - "18081:8080"   # Health check
+      - "19091:9090"   # Metrics
+    volumes:
+      - ../configs:/app/configs:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      init-db:
+        condition: service_completed_successfully
+    networks:
+      - proxy-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  proxy-2:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: proxy-2
+    environment:
+      PROXY_INSTANCE_ID: "proxy-2"
+    ports:
+      - "18082:8080"
+      - "19092:9090"
+    volumes:
+      - ../configs:/app/configs:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      init-db:
+        condition: service_completed_successfully
+    networks:
+      - proxy-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  proxy-3:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: proxy-3
+    environment:
+      PROXY_INSTANCE_ID: "proxy-3"
+    ports:
+      - "18083:8080"
+      - "19093:9090"
+    volumes:
+      - ../configs:/app/configs:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      init-db:
+        condition: service_completed_successfully
+    networks:
+      - proxy-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # HAProxy (L4 Load Balancer — simulates AWS NLB)
+  # ──────────────────────────────────────────────────────────────────────────
+  haproxy:
+    image: haproxy:2.9-alpine
+    container_name: haproxy
+    ports:
+      - "1433:1433"     # TDS proxy (L4 TCP)
+      - "8404:8404"     # HAProxy stats
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      - proxy-1
+      - proxy-2
+      - proxy-3
+    networks:
+      - proxy-network
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Monitoring: Prometheus
+  # ──────────────────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - proxy-network
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Monitoring: Grafana
+  # ──────────────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - proxy-network
+    restart: unless-stopped
+
+# ──────────────────────────────────────────────────────────────────────────
+# Volumes
+# ──────────────────────────────────────────────────────────────────────────
+volumes:
+  sqlserver-bucket-1-data:
+  sqlserver-bucket-2-data:
+  sqlserver-bucket-3-data:
+  redis-data:
+  prometheus-data:
+  grafana-data:
+
+# ──────────────────────────────────────────────────────────────────────────
+# Networks
+# ──────────────────────────────────────────────────────────────────────────
+networks:
+  proxy-network:
+    driver: bridge

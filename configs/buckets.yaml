@@ -1,0 +1,36 @@
+buckets:
+  - id: "bucket-001"
+    host: "sqlserver-bucket-1"
+    port: 1433
+    database: "tenant_db"
+    username: "sa"
+    password: "YourStr0ngP@ssword1"
+    max_connections: 50
+    min_idle: 5
+    max_idle_time: 300s
+    connection_timeout: 30s
+    queue_timeout: 30s
+
+  - id: "bucket-002"
+    host: "sqlserver-bucket-2"
+    port: 1433
+    database: "tenant_db"
+    username: "sa"
+    password: "YourStr0ngP@ssword2"
+    max_connections: 50
+    min_idle: 5
+    max_idle_time: 300s
+    connection_timeout: 30s
+    queue_timeout: 30s
+
+  - id: "bucket-003"
+    host: "sqlserver-bucket-3"
+    port: 1433
+    database: "tenant_db"
+    username: "sa"
+    password: "YourStr0ngP@ssword3"
+    max_connections: 50
+    min_idle: 5
+    max_idle_time: 300s
+    connection_timeout: 30s
+    queue_timeout: 30s

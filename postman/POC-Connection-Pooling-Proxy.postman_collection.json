@@ -1,0 +1,969 @@
+{
+    "info": {
+        "name": "POC Connection Pooling Proxy",
+        "description": "Collection para testar todos os endpoints da POC de Connection Pooling Proxy para SQL Server.\n\n## Como usar\n1. Importe esta collection no Postman\n2. Certifique-se de que os containers estão rodando (`make docker-up`)\n3. Execute as pastas na ordem: Infrastructure → Proxy Health → Metrics → Monitoring\n\n## Variáveis\n- `proxy1_health`: http://localhost:18081\n- `proxy2_health`: http://localhost:18082\n- `proxy3_health`: http://localhost:18083\n- `prometheus`: http://localhost:9090\n- `grafana`: http://localhost:3000\n- `haproxy_stats`: http://localhost:8404",
+        "_postman_id": "poc-connection-pooling-proxy",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "variable": [
+        {
+            "key": "proxy1_health",
+            "value": "http://localhost:18081"
+        },
+        {
+            "key": "proxy2_health",
+            "value": "http://localhost:18082"
+        },
+        {
+            "key": "proxy3_health",
+            "value": "http://localhost:18083"
+        },
+        {
+            "key": "proxy1_metrics",
+            "value": "http://localhost:19091"
+        },
+        {
+            "key": "proxy2_metrics",
+            "value": "http://localhost:19092"
+        },
+        {
+            "key": "proxy3_metrics",
+            "value": "http://localhost:19093"
+        },
+        {
+            "key": "prometheus",
+            "value": "http://localhost:9090"
+        },
+        {
+            "key": "grafana",
+            "value": "http://localhost:3000"
+        },
+        {
+            "key": "grafana_user",
+            "value": "admin"
+        },
+        {
+            "key": "grafana_pass",
+            "value": "admin"
+        },
+        {
+            "key": "haproxy_stats",
+            "value": "http://localhost:8404"
+        }
+    ],
+    "item": [
+        {
+            "name": "🏗️ 1. Infrastructure Health",
+            "description": "Verifica se toda a infraestrutura Docker está respondendo.",
+            "item": [
+                {
+                    "name": "Redis — PING via Proxy Health",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{proxy1_health}}/health",
+                        "description": "Verifica Redis + SQL Servers via health check do proxy-1.\nO campo `components` mostra status individual de cada componente."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Status code is 200', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});",
+                                    "",
+                                    "pm.test('Overall status is healthy', function () {",
+                                    "    var json = pm.response.json();",
+                                    "    pm.expect(json.status).to.eql('healthy');",
+                                    "});",
+                                    "",
+                                    "pm.test('Redis is healthy', function () {",
+                                    "    var json = pm.response.json();",
+                                    "    var redis = json.components.find(c => c.name === 'redis');",
+                                    "    pm.expect(redis.status).to.eql('healthy');",
+                                    "    pm.expect(redis.message).to.eql('PONG');",
+                                    "});",
+                                    "",
+                                    "pm.test('All SQL Servers are healthy', function () {",
+                                    "    var json = pm.response.json();",
+                                    "    var sqlServers = json.components.filter(c => c.name.startsWith('sqlserver'));",
+                                    "    pm.expect(sqlServers.length).to.eql(3);",
+                                    "    sqlServers.forEach(function(s) {",
+                                    "        pm.expect(s.status).to.eql('healthy');",
+                                    "        pm.expect(s.message).to.include('Microsoft SQL Server 2022');",
+                                    "    });",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "HAProxy — Stats Page",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{haproxy_stats}}/stats",
+                        "description": "Retorna a página HTML de stats do HAProxy.\nPara visualizar melhor, abra http://localhost:8404/stats no browser."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HAProxy stats page is reachable', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    pm.expect(pm.response.text()).to.include('Statistics Report');",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "HAProxy — Prometheus Metrics",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{haproxy_stats}}/metrics",
+                        "description": "Endpoint de métricas Prometheus do HAProxy.\nMostra bytes in/out, sessões ativas, etc."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('HAProxy metrics endpoint is reachable', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    pm.expect(pm.response.text()).to.include('haproxy_');",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "✅ 2. Proxy Health Checks",
+            "description": "Testa os 3 endpoints de health de cada instância de proxy:\n- `/health` — relatório completo com Redis + SQL Servers\n- `/health/ready` — readiness (mesmo que /health)\n- `/health/live` — liveness (sempre retorna alive se o processo está rodando)",
+            "item": [
+                {
+                    "name": "Proxy 1 — Full Health",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{proxy1_health}}/health"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Proxy 1 is healthy', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    pm.expect(pm.response.json().status).to.eql('healthy');",
+                                    "});",
+                                    "",
+                                    "pm.test('Has 4 components (1 Redis + 3 SQL)', function () {",
+                                    "    pm.expect(pm.response.json().components.length).to.eql(4);",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Proxy 2 — Full Health",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{proxy2_health}}/health"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Proxy 2 is healthy', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    pm.expect(pm.response.json().status).to.eql('healthy');",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Proxy 3 — Full Health",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{proxy3_health}}/health"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Proxy 3 is healthy', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    pm.expect(pm.response.json().status).to.eql('healthy');",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Proxy 1 — Readiness",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{proxy1_health}}/health/ready",
+                        "description": "Readiness probe — retorna 200 se Redis + SQL Servers estão OK.\nKubernetes usaria este endpoint para saber se pode enviar tráfego."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Proxy 1 is ready', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Proxy 1 — Liveness",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{proxy1_health}}/health/live",
+                        "description": "Liveness probe — retorna 200 se o processo está rodando.\nNão verifica dependências externas (Redis, SQL Server)."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Proxy 1 is alive', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    pm.expect(pm.response.json().status).to.eql('alive');",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Proxy 2 — Liveness",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{proxy2_health}}/health/live"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Proxy 2 is alive', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Proxy 3 — Liveness",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{proxy3_health}}/health/live"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Proxy 3 is alive', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "📊 3. Prometheus Metrics",
+            "description": "Consulta métricas diretamente dos proxies e do Prometheus.\nOs proxies expõem métricas em formato text/plain (Prometheus exposition format).\nO Prometheus armazena e permite consultas via PromQL.",
+            "item": [
+                {
+                    "name": "Proxy 1 — Raw Metrics (/metrics)",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{proxy1_metrics}}/metrics",
+                        "description": "Retorna TODAS as métricas do proxy-1 em formato Prometheus.\nProcure por prefixo `proxy_` para métricas customizadas."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Metrics endpoint is reachable', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});",
+                                    "",
+                                    "pm.test('Contains proxy_connections_active metric', function () {",
+                                    "    pm.expect(pm.response.text()).to.include('proxy_connections_active');",
+                                    "});",
+                                    "",
+                                    "pm.test('Contains proxy_connections_max metric', function () {",
+                                    "    pm.expect(pm.response.text()).to.include('proxy_connections_max');",
+                                    "});",
+                                    "",
+                                    "pm.test('Contains proxy_queue_length metric', function () {",
+                                    "    pm.expect(pm.response.text()).to.include('proxy_queue_length');",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Proxy 2 — Raw Metrics (/metrics)",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{proxy2_metrics}}/metrics"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Proxy 2 metrics reachable', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    pm.expect(pm.response.text()).to.include('proxy_connections_active');",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Proxy 3 — Raw Metrics (/metrics)",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{proxy3_metrics}}/metrics"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Proxy 3 metrics reachable', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    pm.expect(pm.response.text()).to.include('proxy_connections_active');",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Prometheus — Active Connections (PromQL)",
+                    "request": {
+                        "method": "GET",
+                        "url": {
+                            "raw": "{{prometheus}}/api/v1/query?query=proxy_connections_active",
+                            "host": [
+                                "{{prometheus}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "query"
+                            ],
+                            "query": [
+                                {
+                                    "key": "query",
+                                    "value": "proxy_connections_active"
+                                }
+                            ]
+                        },
+                        "description": "Consulta PromQL que retorna conexões ativas por bucket.\nResultado em JSON com labels (bucket_id, instance, job)."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Prometheus query returns success', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    pm.expect(pm.response.json().status).to.eql('success');",
+                                    "});",
+                                    "",
+                                    "pm.test('Has results for connections', function () {",
+                                    "    var data = pm.response.json().data;",
+                                    "    pm.expect(data.resultType).to.eql('vector');",
+                                    "    pm.expect(data.result.length).to.be.above(0);",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Prometheus — Max Connections (PromQL)",
+                    "request": {
+                        "method": "GET",
+                        "url": {
+                            "raw": "{{prometheus}}/api/v1/query?query=proxy_connections_max",
+                            "host": [
+                                "{{prometheus}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "query"
+                            ],
+                            "query": [
+                                {
+                                    "key": "query",
+                                    "value": "proxy_connections_max"
+                                }
+                            ]
+                        },
+                        "description": "Retorna o max_connections configurado por bucket (50 cada)."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Max connections query succeeds', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    pm.expect(pm.response.json().status).to.eql('success');",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Prometheus — Queue Length (PromQL)",
+                    "request": {
+                        "method": "GET",
+                        "url": {
+                            "raw": "{{prometheus}}/api/v1/query?query=proxy_queue_length",
+                            "host": [
+                                "{{prometheus}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "query"
+                            ],
+                            "query": [
+                                {
+                                    "key": "query",
+                                    "value": "proxy_queue_length"
+                                }
+                            ]
+                        },
+                        "description": "Retorna o tamanho atual da fila de espera por bucket."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Queue length query succeeds', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    pm.expect(pm.response.json().status).to.eql('success');",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Prometheus — Instance Heartbeat (PromQL)",
+                    "request": {
+                        "method": "GET",
+                        "url": {
+                            "raw": "{{prometheus}}/api/v1/query?query=proxy_instance_heartbeat",
+                            "host": [
+                                "{{prometheus}}"
+                            ],
+                            "path": [
+                                "api",
+                                "v1",
+                                "query"
+                            ],
+                            "query": [
+                                {
+                                    "key": "query",
+                                    "value": "proxy_instance_heartbeat"
+                                }
+                            ]
+                        },
+                        "description": "Verifica quais instâncias de proxy estão enviando heartbeat.\nValor 1 = UP, 0 = DOWN."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('All instances sending heartbeat', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    var results = pm.response.json().data.result;",
+                                    "    pm.expect(results.length).to.be.above(0);",
+                                    "    results.forEach(function(r) {",
+                                    "        pm.expect(r.value[1]).to.eql('1');",
+                                    "    });",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Prometheus — Targets Status",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{prometheus}}/api/v1/targets",
+                        "description": "Lista todos os targets configurados no Prometheus e seus estados (up/down)."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Prometheus targets API responds', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    pm.expect(pm.response.json().status).to.eql('success');",
+                                    "});",
+                                    "",
+                                    "pm.test('All targets are up', function () {",
+                                    "    var targets = pm.response.json().data.activeTargets;",
+                                    "    targets.forEach(function(t) {",
+                                    "        pm.expect(t.health).to.eql('up', 'Target ' + t.labels.job + ' should be up');",
+                                    "    });",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "📈 4. Grafana API",
+            "description": "Acessa o Grafana via API REST.\nCredenciais padrão: admin/admin\nDocumentação: https://grafana.com/docs/grafana/latest/developers/http_api/",
+            "item": [
+                {
+                    "name": "Grafana — Health",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{grafana}}/api/health",
+                        "description": "Health check do Grafana (não requer autenticação)."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Grafana is healthy', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    pm.expect(pm.response.json().database).to.eql('ok');",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Grafana — List Datasources",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{grafana}}/api/datasources",
+                        "description": "Lista todos os datasources configurados.\nDeve retornar o Prometheus como datasource padrão.",
+                        "auth": {
+                            "type": "basic",
+                            "basic": [
+                                {
+                                    "key": "username",
+                                    "value": "{{grafana_user}}"
+                                },
+                                {
+                                    "key": "password",
+                                    "value": "{{grafana_pass}}"
+                                }
+                            ]
+                        }
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Datasources returned', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    var ds = pm.response.json();",
+                                    "    pm.expect(ds.length).to.be.above(0);",
+                                    "});",
+                                    "",
+                                    "pm.test('Prometheus datasource exists', function () {",
+                                    "    var ds = pm.response.json();",
+                                    "    var prom = ds.find(d => d.type === 'prometheus');",
+                                    "    pm.expect(prom).to.not.be.undefined;",
+                                    "    pm.expect(prom.name).to.eql('Prometheus');",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Grafana — Search Dashboards",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{grafana}}/api/search?type=dash-db",
+                        "description": "Lista todos os dashboards disponíveis.\nO dashboard 'Connection Pooling Proxy' foi provisionado automaticamente.",
+                        "auth": {
+                            "type": "basic",
+                            "basic": [
+                                {
+                                    "key": "username",
+                                    "value": "{{grafana_user}}"
+                                },
+                                {
+                                    "key": "password",
+                                    "value": "{{grafana_pass}}"
+                                }
+                            ]
+                        }
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Dashboards found', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    pm.expect(pm.response.json().length).to.be.above(0);",
+                                    "});",
+                                    "",
+                                    "pm.test('Connection Pooling Proxy dashboard exists', function () {",
+                                    "    var dashboards = pm.response.json();",
+                                    "    var proxy = dashboards.find(d => d.title === 'Connection Pooling Proxy');",
+                                    "    pm.expect(proxy).to.not.be.undefined;",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Grafana — Get Dashboard by UID",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{grafana}}/api/dashboards/uid/connection-pooling-proxy",
+                        "description": "Retorna o JSON completo do dashboard provisionado.\nInclui todos os 8 painéis e suas queries PromQL.",
+                        "auth": {
+                            "type": "basic",
+                            "basic": [
+                                {
+                                    "key": "username",
+                                    "value": "{{grafana_user}}"
+                                },
+                                {
+                                    "key": "password",
+                                    "value": "{{grafana_pass}}"
+                                }
+                            ]
+                        }
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Dashboard returned', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});",
+                                    "",
+                                    "pm.test('Dashboard has 8 panels', function () {",
+                                    "    var dash = pm.response.json().dashboard;",
+                                    "    pm.expect(dash.panels.length).to.eql(8);",
+                                    "});",
+                                    "",
+                                    "pm.test('Dashboard title is correct', function () {",
+                                    "    var dash = pm.response.json().dashboard;",
+                                    "    pm.expect(dash.title).to.eql('Connection Pooling Proxy');",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Grafana — List Dashboard Panels",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{grafana}}/api/dashboards/uid/connection-pooling-proxy",
+                        "description": "Mesma request que a anterior, mas o test script extrai e exibe os nomes dos painéis no console do Postman.",
+                        "auth": {
+                            "type": "basic",
+                            "basic": [
+                                {
+                                    "key": "username",
+                                    "value": "{{grafana_user}}"
+                                },
+                                {
+                                    "key": "password",
+                                    "value": "{{grafana_pass}}"
+                                }
+                            ]
+                        }
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('List all panel names', function () {",
+                                    "    var panels = pm.response.json().dashboard.panels;",
+                                    "    console.log('=== Dashboard Panels ===');",
+                                    "    panels.forEach(function(p, i) {",
+                                    "        console.log((i+1) + '. ' + p.title + ' (' + p.type + ')');",
+                                    "    });",
+                                    "    pm.expect(panels.length).to.be.above(0);",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Grafana — Query Active Connections via Grafana",
+                    "request": {
+                        "method": "POST",
+                        "url": "{{grafana}}/api/ds/query",
+                        "description": "Executa uma query PromQL diretamente via API do Grafana.\nÚtil para debug — usa o datasource Prometheus configurado.",
+                        "auth": {
+                            "type": "basic",
+                            "basic": [
+                                {
+                                    "key": "username",
+                                    "value": "{{grafana_user}}"
+                                },
+                                {
+                                    "key": "password",
+                                    "value": "{{grafana_pass}}"
+                                }
+                            ]
+                        },
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"queries\": [\n    {\n      \"refId\": \"A\",\n      \"datasource\": { \"type\": \"prometheus\", \"uid\": \"PBFA97CFB590B2093\" },\n      \"expr\": \"proxy_connections_active\",\n      \"instant\": true\n    }\n  ],\n  \"from\": \"now-5m\",\n  \"to\": \"now\"\n}"
+                        }
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Grafana query returns results', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "🔄 5. Full Stack Validation (Run All)",
+            "description": "Execute esta pasta inteira para validar que toda a stack está saudável.\nUse o Postman Runner: botão 'Run' na pasta → Run.",
+            "item": [
+                {
+                    "name": "✓ All Proxies Healthy",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{proxy1_health}}/health"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Proxy 1 — healthy', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    pm.expect(pm.response.json().status).to.eql('healthy');",
+                                    "});",
+                                    "",
+                                    "// Set next request to proxy 2",
+                                    "postman.setNextRequest('✓ Proxy 2 Healthy');"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "✓ Proxy 2 Healthy",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{proxy2_health}}/health"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Proxy 2 — healthy', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    pm.expect(pm.response.json().status).to.eql('healthy');",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "✓ Proxy 3 Healthy",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{proxy3_health}}/health"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Proxy 3 — healthy', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    pm.expect(pm.response.json().status).to.eql('healthy');",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "✓ Prometheus Scraping",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{prometheus}}/api/v1/targets"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('All Prometheus targets UP', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    var targets = pm.response.json().data.activeTargets;",
+                                    "    var allUp = targets.every(t => t.health === 'up');",
+                                    "    pm.expect(allUp).to.be.true;",
+                                    "    pm.expect(targets.length).to.eql(5, '5 targets: 3 proxy + 1 haproxy + 1 prometheus');",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "✓ Grafana Running",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{grafana}}/api/health"
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Grafana is running', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    pm.expect(pm.response.json().database).to.eql('ok');",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "✓ Dashboard Provisioned",
+                    "request": {
+                        "method": "GET",
+                        "url": "{{grafana}}/api/search?type=dash-db",
+                        "auth": {
+                            "type": "basic",
+                            "basic": [
+                                {
+                                    "key": "username",
+                                    "value": "{{grafana_user}}"
+                                },
+                                {
+                                    "key": "password",
+                                    "value": "{{grafana_pass}}"
+                                }
+                            ]
+                        }
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test('Dashboard exists', function () {",
+                                    "    pm.response.to.have.status(200);",
+                                    "    var d = pm.response.json().find(x => x.uid === 'connection-pooling-proxy');",
+                                    "    pm.expect(d).to.not.be.undefined;",
+                                    "    pm.expect(d.title).to.eql('Connection Pooling Proxy');",
+                                    "});"
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

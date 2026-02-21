@@ -10,16 +10,16 @@ import (
 	"github.com/joao-brasil/poc-connection-pooling/pkg/bucket"
 )
 
-// Manager manages connection pools for all configured buckets.
-// It is the primary entry point for Phase 1 — single-instance pooling.
-// In Phase 3, the coordinator (Redis) wraps the Manager for distributed limits.
+// Manager gerencia connection pools para todos os buckets configurados.
+// É o ponto de entrada principal para a Fase 1 — pooling de instância única.
+// Na Fase 3, o coordinator (Redis) encapsula o Manager para limites distribuídos.
 type Manager struct {
 	mu    sync.RWMutex
 	pools map[string]*BucketPool // keyed by bucket ID
 	cfg   *config.Config
 }
 
-// NewManager creates a Manager and initializes a BucketPool for each bucket.
+// NewManager cria um Manager e inicializa um BucketPool para cada bucket.
 func NewManager(ctx context.Context, cfg *config.Config) (*Manager, error) {
 	m := &Manager{
 		pools: make(map[string]*BucketPool, len(cfg.Buckets)),
@@ -30,7 +30,7 @@ func NewManager(ctx context.Context, cfg *config.Config) (*Manager, error) {
 		b := &cfg.Buckets[i]
 		pool, err := NewBucketPool(ctx, b)
 		if err != nil {
-			// Close any already-created pools before returning.
+			// Fechar quaisquer pools já criados antes de retornar.
 			m.Close()
 			return nil, fmt.Errorf("initializing pool for bucket %s: %w", b.ID, err)
 		}
@@ -41,7 +41,7 @@ func NewManager(ctx context.Context, cfg *config.Config) (*Manager, error) {
 	return m, nil
 }
 
-// Acquire obtains a connection from the pool for the specified bucket.
+// Acquire obtém uma conexão do pool para o bucket especificado.
 func (m *Manager) Acquire(ctx context.Context, bucketID string) (*PooledConn, error) {
 	m.mu.RLock()
 	pool, ok := m.pools[bucketID]
@@ -54,12 +54,12 @@ func (m *Manager) Acquire(ctx context.Context, bucketID string) (*PooledConn, er
 	return pool.Acquire(ctx)
 }
 
-// AcquireForBucket obtains a connection from the pool for the specified bucket config.
+// AcquireForBucket obtém uma conexão do pool para a configuração de bucket especificada.
 func (m *Manager) AcquireForBucket(ctx context.Context, b *bucket.Bucket) (*PooledConn, error) {
 	return m.Acquire(ctx, b.ID)
 }
 
-// Release returns a connection back to its bucket pool.
+// Release devolve uma conexão de volta ao pool do seu bucket.
 func (m *Manager) Release(conn *PooledConn) {
 	if conn == nil {
 		return
@@ -78,7 +78,7 @@ func (m *Manager) Release(conn *PooledConn) {
 	pool.Release(conn)
 }
 
-// Discard removes a connection permanently from its bucket pool.
+// Discard remove uma conexão permanentemente do pool do seu bucket.
 func (m *Manager) Discard(conn *PooledConn) {
 	if conn == nil {
 		return
@@ -96,7 +96,7 @@ func (m *Manager) Discard(conn *PooledConn) {
 	pool.Discard(conn)
 }
 
-// Stats returns pool statistics for all buckets.
+// Stats retorna estatísticas do pool para todos os buckets.
 func (m *Manager) Stats() []PoolStats {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -108,7 +108,7 @@ func (m *Manager) Stats() []PoolStats {
 	return stats
 }
 
-// Pool returns the BucketPool for a given bucket ID.
+// Pool retorna o BucketPool para um dado ID de bucket.
 func (m *Manager) Pool(bucketID string) (*BucketPool, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -116,7 +116,7 @@ func (m *Manager) Pool(bucketID string) (*BucketPool, bool) {
 	return p, ok
 }
 
-// Close shuts down all bucket pools.
+// Close encerra todos os bucket pools.
 func (m *Manager) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -15,12 +15,12 @@ import (
 	"github.com/joao-brasil/poc-connection-pooling/internal/queue"
 )
 
-// ── TDS Proxy Server ────────────────────────────────────────────────────
+// ── Servidor TDS Proxy ────────────────────────────────────────────────
 //
-// The Server listens on a TCP port (typically 1433) and handles incoming
-// TDS connections. Each connection is handled in its own goroutine.
+// O Server escuta em uma porta TCP (tipicamente 1433) e trata conexões
+// TDS recebidas. Cada conexão é tratada em sua própria goroutine.
 
-// Server is the main TDS proxy server.
+// Server é o servidor principal do proxy TDS.
 type Server struct {
 	cfg         *config.Config
 	poolMgr     *pool.Manager
@@ -29,20 +29,20 @@ type Server struct {
 	router      *Router
 	listener    net.Listener
 
-	// activeSessions tracks the number of active sessions.
+	// activeSessions rastreia o número de sessões ativas.
 	activeSessions atomic.Int64
 
-	// done signals when the server has stopped.
+	// done sinaliza quando o servidor parou.
 	done chan struct{}
 
-	// wg tracks active session goroutines for graceful shutdown.
+	// wg rastreia goroutines de sessões ativas para shutdown gracioso.
 	wg sync.WaitGroup
 
-	// cancel is used to signal all sessions to stop.
+	// cancel é usado para sinalizar todas as sessões a pararem.
 	cancel context.CancelFunc
 }
 
-// NewServer creates a new TDS proxy server.
+// NewServer cria um novo servidor proxy TDS.
 func NewServer(cfg *config.Config, poolMgr *pool.Manager, rc *coordinator.RedisCoordinator, dq *queue.DistributedQueue) *Server {
 	return &Server{
 		cfg:         cfg,
@@ -54,7 +54,7 @@ func NewServer(cfg *config.Config, poolMgr *pool.Manager, rc *coordinator.RedisC
 	}
 }
 
-// Start begins listening for TDS connections.
+// Start começa a escutar por conexões TDS.
 func (s *Server) Start(ctx context.Context) error {
 	addr := fmt.Sprintf("%s:%d", s.cfg.Proxy.ListenAddr, s.cfg.Proxy.ListenPort)
 
@@ -64,26 +64,26 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	s.listener = listener
 
-	// Create a cancellable context for all sessions.
+	// Criar um contexto cancelável para todas as sessões.
 	ctx, cancel := context.WithCancel(ctx)
 	s.cancel = cancel
 
 	log.Printf("[proxy] TDS proxy listening on %s", addr)
 
-	// Accept connections in a goroutine.
+	// Aceitar conexões em uma goroutine.
 	go s.acceptLoop(ctx)
 
 	return nil
 }
 
-// acceptLoop accepts incoming connections and spawns session handlers.
+// acceptLoop aceita conexões recebidas e inicia handlers de sessão.
 func (s *Server) acceptLoop(ctx context.Context) {
 	defer close(s.done)
 
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
-			// Check if the listener was closed (graceful shutdown).
+			// Verificar se o listener foi fechado (shutdown gracioso).
 			select {
 			case <-ctx.Done():
 				return
@@ -96,7 +96,7 @@ func (s *Server) acceptLoop(ctx context.Context) {
 			}
 
 			log.Printf("[proxy] Accept error: %v", err)
-			// Brief sleep to avoid busy-loop on repeated errors.
+			// Pausa breve para evitar busy-loop em erros repetidos.
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
@@ -114,23 +114,23 @@ func (s *Server) acceptLoop(ctx context.Context) {
 	}
 }
 
-// Stop gracefully shuts down the proxy server.
-// It stops accepting new connections and waits for active sessions to finish.
+// Stop encerra graciosamente o servidor proxy.
+// Para de aceitar novas conexões e aguarda as sessões ativas terminarem.
 func (s *Server) Stop(ctx context.Context) error {
 	log.Printf("[proxy] Shutting down TDS proxy (active sessions: %d)...",
 		s.activeSessions.Load())
 
-	// Stop accepting new connections.
+	// Parar de aceitar novas conexões.
 	if s.listener != nil {
 		s.listener.Close()
 	}
 
-	// Cancel all sessions.
+	// Cancelar todas as sessões.
 	if s.cancel != nil {
 		s.cancel()
 	}
 
-	// Wait for all sessions to finish with a timeout.
+	// Aguardar todas as sessões terminarem com um timeout.
 	doneCh := make(chan struct{})
 	go func() {
 		s.wg.Wait()
@@ -147,12 +147,12 @@ func (s *Server) Stop(ctx context.Context) error {
 	return nil
 }
 
-// ActiveSessions returns the number of currently active sessions.
+// ActiveSessions retorna o número de sessões atualmente ativas.
 func (s *Server) ActiveSessions() int64 {
 	return s.activeSessions.Load()
 }
 
-// isListenerClosed checks if an error indicates the listener was closed.
+// isListenerClosed verifica se um erro indica que o listener foi fechado.
 func isListenerClosed(err error) bool {
 	if opErr, ok := err.(*net.OpError); ok {
 		return opErr.Err.Error() == "use of closed network connection"

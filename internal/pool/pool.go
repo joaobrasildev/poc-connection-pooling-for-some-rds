@@ -14,41 +14,41 @@ import (
 	_ "github.com/microsoft/go-mssqldb"
 )
 
-// BucketPool manages a pool of SQL Server connections for a single bucket.
-// It provides acquire/release semantics with configurable limits, a warm pool
-// of idle connections, eviction of stale connections, and health checking.
+// BucketPool gerencia um pool de conexões SQL Server para um único bucket.
+// Fornece semântica de acquire/release com limites configuráveis, um pool aquecido
+// de conexões idle, evição de conexões stale, e health checking.
 type BucketPool struct {
 	mu sync.Mutex
 
 	bucket *bucket.Bucket
 
-	// idle holds connections available for reuse, most recently used first.
+	// idle mantém conexões disponíveis para reuso, a mais recentemente usada primeiro.
 	idle []*PooledConn
 
-	// active tracks connections currently in use (keyed by connection ID).
+	// active rastreia conexões atualmente em uso (indexadas pelo ID da conexão).
 	active map[uint64]*PooledConn
 
-	// nextID is an atomic counter for assigning unique connection IDs.
+	// nextID é um contador atômico para atribuir IDs únicos de conexão.
 	nextID atomic.Uint64
 
-	// closed indicates whether the pool has been shut down.
+	// closed indica se o pool foi encerrado.
 	closed bool
 
-	// waiters is a channel-based queue for callers waiting for a connection.
-	// Each waiter sends a channel that will receive the allocated connection.
+	// waiters é uma fila baseada em channel para chamadores aguardando uma conexão.
+	// Cada waiter envia um channel que receberá a conexão alocada.
 	waiters []chan *PooledConn
 
-	// notify is used to signal that a connection has been returned to the pool.
+	// notify é usado para sinalizar que uma conexão foi devolvida ao pool.
 	notify chan struct{}
 
-	// stopCh signals background goroutines to stop.
+	// stopCh sinaliza goroutines em segundo plano para parar.
 	stopCh chan struct{}
 
-	// wg tracks background goroutines.
+	// wg rastreia goroutines em segundo plano.
 	wg sync.WaitGroup
 }
 
-// NewBucketPool creates a new pool for the given bucket and eagerly opens min_idle connections.
+// NewBucketPool cria um novo pool para o bucket especificado e abre eagerly min_idle conexões.
 func NewBucketPool(ctx context.Context, b *bucket.Bucket) (*BucketPool, error) {
 	bp := &BucketPool{
 		bucket:  b,
@@ -58,7 +58,7 @@ func NewBucketPool(ctx context.Context, b *bucket.Bucket) (*BucketPool, error) {
 		stopCh:  make(chan struct{}),
 	}
 
-	// Eagerly create min_idle connections (warm pool).
+	// Criar eagerly min_idle conexões (pool aquecido).
 	for i := 0; i < b.MinIdle; i++ {
 		conn, err := bp.createConn(ctx)
 		if err != nil {
@@ -73,16 +73,16 @@ func NewBucketPool(ctx context.Context, b *bucket.Bucket) (*BucketPool, error) {
 	log.Printf("[pool] Bucket %s — pool initialized: %d idle, max=%d",
 		b.ID, len(bp.idle), b.MaxConnections)
 
-	// Start background maintenance.
+	// Iniciar manutenção em segundo plano.
 	bp.wg.Add(1)
 	go bp.maintenanceLoop()
 
 	return bp, nil
 }
 
-// Acquire obtains a connection from the pool. If no connection is available
-// and the pool is at max capacity, the caller blocks until a connection is
-// released or the context expires.
+// Acquire obtém uma conexão do pool. Se nenhuma conexão estiver disponível
+// e o pool estiver na capacidade máxima, o chamador bloqueia até que uma
+// conexão seja liberada ou o context expire.
 func (bp *BucketPool) Acquire(ctx context.Context) (*PooledConn, error) {
 	start := time.Now()
 
@@ -92,7 +92,7 @@ func (bp *BucketPool) Acquire(ctx context.Context) (*PooledConn, error) {
 		return nil, fmt.Errorf("pool closed for bucket %s", bp.bucket.ID)
 	}
 
-	// Try to get an idle connection.
+	// Tentar obter uma conexão idle.
 	if conn := bp.popIdle(); conn != nil {
 		bp.active[conn.id] = conn
 		conn.markAcquired()
@@ -102,7 +102,7 @@ func (bp *BucketPool) Acquire(ctx context.Context) (*PooledConn, error) {
 		return conn, nil
 	}
 
-	// If under max, create a new connection.
+	// Se abaixo do máximo, criar uma nova conexão.
 	totalCount := len(bp.idle) + len(bp.active)
 	if totalCount < bp.bucket.MaxConnections {
 		bp.mu.Unlock()
@@ -120,7 +120,7 @@ func (bp *BucketPool) Acquire(ctx context.Context) (*PooledConn, error) {
 		return conn, nil
 	}
 
-	// Pool is full — enter wait queue.
+	// Pool está cheio — entrar na fila de espera.
 	waiterCh := make(chan *PooledConn, 1)
 	bp.waiters = append(bp.waiters, waiterCh)
 	metrics.QueueLength.WithLabelValues(bp.bucket.ID).Set(float64(len(bp.waiters)))
@@ -129,7 +129,7 @@ func (bp *BucketPool) Acquire(ctx context.Context) (*PooledConn, error) {
 	log.Printf("[pool] Bucket %s — connection queue entered, position=%d",
 		bp.bucket.ID, len(bp.waiters))
 
-	// Wait for either a connection, context cancellation, or queue timeout.
+	// Aguardar uma conexão, cancelamento de context, ou timeout da fila.
 	queueTimeout := bp.bucket.QueueTimeout
 	if queueTimeout == 0 {
 		queueTimeout = 30 * time.Second
@@ -160,8 +160,8 @@ func (bp *BucketPool) Acquire(ctx context.Context) (*PooledConn, error) {
 	}
 }
 
-// Release returns a connection back to the pool. It runs sp_reset_connection
-// to clean session state before making it available for reuse.
+// Release devolve uma conexão ao pool. Executa sp_reset_connection
+// para limpar o estado da sessão antes de torná-la disponível para reuso.
 func (bp *BucketPool) Release(conn *PooledConn) {
 	if conn == nil {
 		return
@@ -176,7 +176,7 @@ func (bp *BucketPool) Release(conn *PooledConn) {
 	delete(bp.active, conn.id)
 	bp.mu.Unlock()
 
-	// Reset session state so the connection is safe for reuse.
+	// Resetar estado da sessão para que a conexão seja segura para reuso.
 	if err := bp.resetConnection(conn); err != nil {
 		log.Printf("[pool] Bucket %s — sp_reset_connection failed on conn %d, closing: %v",
 			bp.bucket.ID, conn.id, err)
@@ -191,7 +191,7 @@ func (bp *BucketPool) Release(conn *PooledConn) {
 	conn.markIdle()
 
 	bp.mu.Lock()
-	// Hand off to a waiter if one is queued.
+	// Entregar a um waiter se houver algum na fila.
 	if len(bp.waiters) > 0 {
 		waiterCh := bp.waiters[0]
 		bp.waiters = bp.waiters[1:]
@@ -211,7 +211,7 @@ func (bp *BucketPool) Release(conn *PooledConn) {
 	metrics.ConnectionsTotal.WithLabelValues(bp.bucket.ID, "released").Inc()
 }
 
-// Discard removes a connection from the pool permanently (e.g. on error).
+// Discard remove uma conexão do pool permanentemente (ex: em caso de erro).
 func (bp *BucketPool) Discard(conn *PooledConn) {
 	if conn == nil {
 		return
@@ -224,7 +224,7 @@ func (bp *BucketPool) Discard(conn *PooledConn) {
 	metrics.ConnectionErrors.WithLabelValues(bp.bucket.ID, "discarded").Inc()
 }
 
-// Close shuts down the pool, closing all connections and notifying waiters.
+// Close encerra o pool, fechando todas as conexões e notificando waiters.
 func (bp *BucketPool) Close() error {
 	bp.mu.Lock()
 	if bp.closed {
@@ -233,22 +233,22 @@ func (bp *BucketPool) Close() error {
 	}
 	bp.closed = true
 
-	// Signal background goroutines to stop.
+	// Sinalizar goroutines em segundo plano para parar.
 	close(bp.stopCh)
 
-	// Notify all waiters that the pool is closing.
+	// Notificar todos os waiters que o pool está fechando.
 	for _, w := range bp.waiters {
 		close(w)
 	}
 	bp.waiters = nil
 
-	// Close all idle connections.
+	// Fechar todas as conexões idle.
 	for _, c := range bp.idle {
 		c.Close()
 	}
 	bp.idle = nil
 
-	// Close all active connections.
+	// Fechar todas as conexões ativas.
 	for _, c := range bp.active {
 		c.Close()
 	}
@@ -256,14 +256,14 @@ func (bp *BucketPool) Close() error {
 
 	bp.mu.Unlock()
 
-	// Wait for background goroutines.
+	// Aguardar goroutines em segundo plano.
 	bp.wg.Wait()
 
 	log.Printf("[pool] Bucket %s — pool closed", bp.bucket.ID)
 	return nil
 }
 
-// Stats returns current pool statistics.
+// Stats retorna as estatísticas atuais do pool.
 func (bp *BucketPool) Stats() PoolStats {
 	bp.mu.Lock()
 	defer bp.mu.Unlock()
@@ -276,7 +276,7 @@ func (bp *BucketPool) Stats() PoolStats {
 	}
 }
 
-// PoolStats holds pool statistics.
+// PoolStats contém as estatísticas do pool.
 type PoolStats struct {
 	BucketID  string
 	Active    int
@@ -285,9 +285,9 @@ type PoolStats struct {
 	WaitQueue int
 }
 
-// ── Internal helpers ─────────────────────────────────────────────────────
+// ── Auxiliares internos ─────────────────────────────────────────────────────
 
-// createConn opens a new SQL Server connection for this bucket.
+// createConn abre uma nova conexão SQL Server para este bucket.
 func (bp *BucketPool) createConn(ctx context.Context) (*PooledConn, error) {
 	id := bp.nextID.Add(1)
 
@@ -296,13 +296,13 @@ func (bp *BucketPool) createConn(ctx context.Context) (*PooledConn, error) {
 		return nil, fmt.Errorf("sql.Open: %w", err)
 	}
 
-	// We use sql.DB as a single-connection pool (MaxOpenConns=1) so each
-	// PooledConn maps 1:1 to a physical SQL Server connection.
+	// Usamos sql.DB como pool de conexão única (MaxOpenConns=1) para que cada
+	// PooledConn mapeie 1:1 para uma conexão física do SQL Server.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	db.SetConnMaxLifetime(0) // We manage lifetime ourselves.
+	db.SetConnMaxLifetime(0) // Gerenciamos o tempo de vida nós mesmos.
 
-	// Verify the connection is actually reachable.
+	// Verificar se a conexão é realmente alcançável.
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("ping: %w", err)
@@ -311,16 +311,16 @@ func (bp *BucketPool) createConn(ctx context.Context) (*PooledConn, error) {
 	return newPooledConn(id, bp.bucket.ID, db), nil
 }
 
-// popIdle removes and returns the most recently used idle connection,
-// skipping any that are stale. Returns nil if none available.
+// popIdle remove e retorna a conexão idle mais recentemente usada,
+// pulando qualquer uma que esteja stale. Retorna nil se nenhuma estiver disponível.
 func (bp *BucketPool) popIdle() *PooledConn {
 	for len(bp.idle) > 0 {
-		// Pop from the end (most recently used / LIFO for connection reuse).
+		// Remover do final (mais recentemente usada / LIFO para reuso de conexão).
 		n := len(bp.idle) - 1
 		conn := bp.idle[n]
 		bp.idle = bp.idle[:n]
 
-		// Skip connections that have been idle too long.
+		// Pular conexões que ficaram idle por tempo demais.
 		if bp.bucket.MaxIdleTime > 0 && conn.idleDuration() > bp.bucket.MaxIdleTime {
 			conn.Close()
 			continue
@@ -330,7 +330,7 @@ func (bp *BucketPool) popIdle() *PooledConn {
 	return nil
 }
 
-// removeWaiter removes a specific waiter channel from the wait queue.
+// removeWaiter remove um channel de waiter específico da fila de espera.
 func (bp *BucketPool) removeWaiter(ch chan *PooledConn) {
 	bp.mu.Lock()
 	defer bp.mu.Unlock()
@@ -343,7 +343,7 @@ func (bp *BucketPool) removeWaiter(ch chan *PooledConn) {
 	}
 }
 
-// resetConnection runs sp_reset_connection to clear session state.
+// resetConnection executa sp_reset_connection para limpar o estado da sessão.
 func (bp *BucketPool) resetConnection(conn *PooledConn) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -351,13 +351,13 @@ func (bp *BucketPool) resetConnection(conn *PooledConn) error {
 	return err
 }
 
-// updateMetrics refreshes Prometheus gauges for this pool.
+// updateMetrics atualiza os gauges do Prometheus para este pool.
 func (bp *BucketPool) updateMetrics() {
 	metrics.ConnectionsActive.WithLabelValues(bp.bucket.ID).Set(float64(len(bp.active)))
 	metrics.ConnectionsIdle.WithLabelValues(bp.bucket.ID).Set(float64(len(bp.idle)))
 }
 
-// maintenanceLoop runs periodic eviction and health checks.
+// maintenanceLoop executa evição periódica e health checks.
 func (bp *BucketPool) maintenanceLoop() {
 	defer bp.wg.Done()
 
@@ -375,7 +375,7 @@ func (bp *BucketPool) maintenanceLoop() {
 	}
 }
 
-// evictStale removes idle connections that have exceeded max_idle_time.
+// evictStale remove conexões idle que excederam o max_idle_time.
 func (bp *BucketPool) evictStale() {
 	bp.mu.Lock()
 	defer bp.mu.Unlock()
@@ -402,7 +402,7 @@ func (bp *BucketPool) evictStale() {
 	}
 }
 
-// ensureMinIdle creates new connections to maintain the min_idle threshold.
+// ensureMinIdle cria novas conexões para manter o limiar de min_idle.
 func (bp *BucketPool) ensureMinIdle() {
 	bp.mu.Lock()
 	deficit := bp.bucket.MinIdle - len(bp.idle)

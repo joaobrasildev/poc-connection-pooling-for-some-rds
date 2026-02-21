@@ -1,4 +1,4 @@
-// Package config handles loading and validating proxy and bucket configuration from YAML files.
+// Package config trata o carregamento e validação da configuração de proxy e bucket a partir de arquivos YAML.
 package config
 
 import (
@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ProxyConfig holds the main proxy configuration.
+// ProxyConfig contém a configuração principal do proxy.
 type ProxyConfig struct {
 	ListenAddr          string        `yaml:"listen_addr"`
 	ListenPort          int           `yaml:"listen_port"`
@@ -25,7 +25,7 @@ type ProxyConfig struct {
 	MetricsPort         int           `yaml:"metrics_port"`
 }
 
-// RedisConfig holds the Redis connection configuration.
+// RedisConfig contém a configuração de conexão do Redis.
 type RedisConfig struct {
 	Addr              string        `yaml:"addr"`
 	Password          string        `yaml:"password"`
@@ -38,13 +38,13 @@ type RedisConfig struct {
 	HeartbeatTTL      time.Duration `yaml:"heartbeat_ttl"`
 }
 
-// FallbackConfig holds configuration for fallback mode when Redis is unavailable.
+// FallbackConfig contém configuração para o modo fallback quando o Redis está indisponível.
 type FallbackConfig struct {
 	Enabled           bool `yaml:"enabled"`
 	LocalLimitDivisor int  `yaml:"local_limit_divisor"`
 }
 
-// Config is the root configuration structure.
+// Config é a estrutura raiz de configuração.
 type Config struct {
 	Proxy    ProxyConfig    `yaml:"proxy"`
 	Redis    RedisConfig    `yaml:"redis"`
@@ -52,19 +52,19 @@ type Config struct {
 	Buckets  []bucket.Bucket
 }
 
-// proxyFileConfig mirrors the YAML structure for the proxy config file.
+// proxyFileConfig espelha a estrutura YAML para o arquivo de configuração do proxy.
 type proxyFileConfig struct {
 	Proxy    ProxyConfig    `yaml:"proxy"`
 	Redis    RedisConfig    `yaml:"redis"`
 	Fallback FallbackConfig `yaml:"fallback"`
 }
 
-// bucketsFileConfig mirrors the YAML structure for the buckets config file.
+// bucketsFileConfig espelha a estrutura YAML para o arquivo de configuração dos buckets.
 type bucketsFileConfig struct {
 	Buckets []bucket.Bucket `yaml:"buckets"`
 }
 
-// Load reads and parses both proxy and buckets configuration files.
+// Load lê e faz o parse de ambos os arquivos de configuração de proxy e buckets.
 func Load(proxyConfigPath, bucketsConfigPath string) (*Config, error) {
 	proxyData, err := os.ReadFile(proxyConfigPath)
 	if err != nil {
@@ -102,7 +102,7 @@ func Load(proxyConfigPath, bucketsConfigPath string) (*Config, error) {
 	return cfg, nil
 }
 
-// validate checks mandatory fields.
+// validate verifica campos obrigatórios.
 func (c *Config) validate() error {
 	if c.Proxy.ListenPort == 0 {
 		return fmt.Errorf("proxy.listen_port is required")
@@ -127,7 +127,7 @@ func (c *Config) validate() error {
 	return nil
 }
 
-// applyDefaults fills in reasonable defaults for unset optional fields.
+// applyDefaults preenche valores padrão razoáveis para campos opcionais não definidos.
 func (c *Config) applyDefaults() {
 	if c.Proxy.ListenAddr == "" {
 		c.Proxy.ListenAddr = "0.0.0.0"
@@ -201,7 +201,7 @@ func (c *Config) applyDefaults() {
 	}
 }
 
-// BucketByID returns the bucket configuration for a given bucket ID.
+// BucketByID retorna a configuração do bucket para um dado ID de bucket.
 func (c *Config) BucketByID(id string) (*bucket.Bucket, bool) {
 	for i := range c.Buckets {
 		if c.Buckets[i].ID == id {
@@ -211,8 +211,8 @@ func (c *Config) BucketByID(id string) (*bucket.Bucket, bool) {
 	return nil, false
 }
 
-// BucketByDatabase returns the bucket configuration for a given database name.
-// This is used by the TDS proxy to route connections based on the database name in Login7.
+// BucketByDatabase retorna a configuração do bucket para um dado nome de banco de dados.
+// Usado pelo proxy TDS para rotear conexões baseado no nome do banco no Login7.
 func (c *Config) BucketByDatabase(database string) (*bucket.Bucket, bool) {
 	for i := range c.Buckets {
 		if c.Buckets[i].Database == database {

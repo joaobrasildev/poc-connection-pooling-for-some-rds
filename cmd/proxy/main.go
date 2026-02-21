@@ -1,6 +1,6 @@
-// Package main is the entrypoint for the connection pooling proxy.
-// It loads configuration, initializes health checks and metrics,
-// and sets up graceful shutdown handling.
+// Package main é o ponto de entrada do proxy de connection pooling.
+// Carrega a configuração, inicializa health checks e métricas,
+// e configura o tratamento de shutdown gracioso.
 package main
 
 import (
@@ -35,7 +35,7 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Println("[main] Starting Connection Pooling Proxy for SQL Server")
 
-	// ─── Load Configuration ───────────────────────────────────────────
+	// ─── Carregar Configuração ────────────────────────────────────────
 	cfg, err := config.Load(*proxyConfigPath, *bucketsConfigPath)
 	if err != nil {
 		log.Fatalf("[main] Failed to load configuration: %v", err)
@@ -47,8 +47,8 @@ func main() {
 			b.ID, b.Host, b.Port, b.MaxConnections, b.MinIdle)
 	}
 
-	// ─── Initialize Metrics ──────────────────────────────────────────
-	// Pre-register metric labels for each bucket so Grafana shows them immediately
+	// ─── Inicializar Métricas ────────────────────────────────────────
+	// Pré-registrar labels de métricas para cada bucket para que o Grafana os exiba imediatamente
 	for _, b := range cfg.Buckets {
 		metrics.ConnectionsActive.WithLabelValues(b.ID).Set(0)
 		metrics.ConnectionsIdle.WithLabelValues(b.ID).Set(0)
@@ -57,7 +57,7 @@ func main() {
 	}
 	metrics.InstanceHeartbeat.WithLabelValues(cfg.Proxy.InstanceID).Set(1)
 
-	// Metrics HTTP server (Prometheus scrape endpoint)
+	// Servidor HTTP de métricas (endpoint de scrape do Prometheus)
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", promhttp.Handler())
 	metricsServer := &http.Server{
@@ -73,12 +73,12 @@ func main() {
 		}
 	}()
 
-	// ─── Initialize Health Checker ───────────────────────────────────
+	// ─── Inicializar Health Checker ──────────────────────────────────
 	checker := health.NewChecker(cfg)
 	healthServer := checker.ServeHTTP(context.Background())
 	log.Printf("[main] Health check server listening on :%d/health", cfg.Proxy.HealthCheckPort)
 
-	// ─── Run Initial Health Check ────────────────────────────────────
+	// ─── Executar Health Check Inicial ───────────────────────────────
 	log.Println("[main] Running initial health check...")
 	report := checker.Check(context.Background())
 	for _, comp := range report.Components {
@@ -90,7 +90,7 @@ func main() {
 	}
 	log.Printf("[main] Overall health: %s", report.Status)
 
-	// ─── Phase 1 — Initialize Connection Pool Manager ─────────
+	// ─── Fase 1 — Inicializar Gerenciador de Connection Pool ────────
 	log.Println("[main] Initializing connection pool manager...")
 	poolMgr, err := pool.NewManager(context.Background(), cfg)
 	if err != nil {
@@ -107,7 +107,7 @@ func main() {
 		log.Printf("[main]   Pool %s: idle=%d, active=%d, max=%d", s.BucketID, s.Idle, s.Active, s.Max)
 	}
 
-	// ─── Phase 3 — Initialize Redis Coordinator ─────────────────────
+	// ─── Fase 3 — Inicializar Coordenador Redis ─────────────────────
 	log.Println("[main] Initializing Redis coordinator...")
 	rc, err := coordinator.NewRedisCoordinator(context.Background(), cfg)
 	if err != nil {
@@ -127,17 +127,17 @@ func main() {
 		log.Println("[main] Coordinator ready (Redis connected)")
 	}
 
-	// Start heartbeat.
+	// Iniciar heartbeat.
 	hb := coordinator.NewHeartbeat(rc)
 	hb.Start(context.Background())
 	defer hb.Stop()
 
-	// ─── Phase 4 — Initialize Distributed Queue ───────────────────────
+	// ─── Fase 4 — Inicializar Fila Distribuída ─────────────────────────
 	dq := queue.NewDistributedQueue(rc, cfg.Proxy.QueueTimeout, cfg.Proxy.MaxQueueSize)
 	log.Printf("[main] Distributed queue ready (timeout=%s, max_queue_size=%d)",
 		cfg.Proxy.QueueTimeout, cfg.Proxy.MaxQueueSize)
 
-	// ─── Phase 2 — Initialize TDS Proxy ────────────────────────────
+	// ─── Fase 2 — Inicializar Proxy TDS ─────────────────────────────
 	proxyServer := proxy.NewServer(cfg, poolMgr, rc, dq)
 	if err := proxyServer.Start(context.Background()); err != nil {
 		log.Fatalf("[main] Failed to start TDS proxy: %v", err)
@@ -152,7 +152,7 @@ func main() {
 	}()
 	log.Printf("[main] TDS proxy listening on %s:%d", cfg.Proxy.ListenAddr, cfg.Proxy.ListenPort)
 
-	// ─── Graceful Shutdown ───────────────────────────────────────────
+	// ─── Shutdown Gracioso ───────────────────────────────────────────
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -163,7 +163,7 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	// Shutdown in reverse order
+	// Shutdown em ordem reversa
 	metrics.InstanceHeartbeat.WithLabelValues(cfg.Proxy.InstanceID).Set(0)
 
 	if err := healthServer.Shutdown(shutdownCtx); err != nil {

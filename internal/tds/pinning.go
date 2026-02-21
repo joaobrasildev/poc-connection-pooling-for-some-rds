@@ -7,32 +7,32 @@ import (
 	"unicode/utf16"
 )
 
-// ── Connection Pinning Detection (MS-TDS) ───────────────────────────────
+// ── Detecção de Connection Pinning (MS-TDS) ────────────────────────────
 //
-// The proxy inspects TDS packets to detect when a connection must be "pinned"
-// (not returned to pool) because of server-side state:
+// O proxy inspeciona pacotes TDS para detectar quando uma conexão deve ser "pinada"
+// (não devolvida ao pool) por causa de estado no servidor:
 //
-//   - Explicit transactions:  BEGIN TRAN / COMMIT / ROLLBACK
-//   - Prepared statements:    sp_prepare / sp_unprepare
-//   - Bulk load:              BULK_LOAD packets
-//   - Transaction manager:    TM_BEGIN_XACT / TM_COMMIT_XACT / TM_ROLLBACK_XACT
+//   - Transações explícitas:     BEGIN TRAN / COMMIT / ROLLBACK
+//   - Prepared statements:       sp_prepare / sp_unprepare
+//   - Bulk load:                 pacotes BULK_LOAD
+//   - Transaction manager:       TM_BEGIN_XACT / TM_COMMIT_XACT / TM_ROLLBACK_XACT
 
-// PinAction describes what the proxy should do after inspecting a packet.
+// PinAction descreve o que o proxy deve fazer após inspecionar um pacote.
 type PinAction int
 
 const (
-	PinActionNone   PinAction = iota // No pinning change
-	PinActionPin                     // Pin the connection
-	PinActionUnpin                   // Unpin the connection
+	PinActionNone   PinAction = iota // Sem alteração de pinning
+	PinActionPin                     // Pinar a conexão
+	PinActionUnpin                   // Despinar a conexão
 )
 
-// PinResult holds the result of pin inspection.
+// PinResult contém o resultado da inspeção de pinning.
 type PinResult struct {
 	Action PinAction
-	Reason string // Human-readable reason
+	Reason string // Motivo legível por humanos
 }
 
-// Transaction Manager request types (MS-TDS 2.2.7.17).
+// Tipos de requisição do Transaction Manager (MS-TDS 2.2.7.17).
 const (
 	tmBeginXact    uint16 = 5
 	tmCommitXact   uint16 = 7
@@ -40,8 +40,8 @@ const (
 	tmSavepoint    uint16 = 9
 )
 
-// InspectPacket inspects a TDS packet payload and header to determine
-// if connection pinning should be engaged or released.
+// InspectPacket inspeciona o payload e header de um pacote TDS para determinar
+// se o connection pinning deve ser ativado ou liberado.
 func InspectPacket(pktType PacketType, payload []byte) PinResult {
 	switch pktType {
 	case PacketSQLBatch:
@@ -57,12 +57,12 @@ func InspectPacket(pktType PacketType, payload []byte) PinResult {
 	}
 }
 
-// inspectSQLBatch looks for transaction control statements in a SQL Batch.
-// The payload is ALL_HEADERS + SQL text in UTF-16 LE.
+// inspectSQLBatch procura instruções de controle de transação em um SQL Batch.
+// O payload é ALL_HEADERS + texto SQL em UTF-16 LE.
 func inspectSQLBatch(payload []byte) PinResult {
-	// SQL Batch payload starts with ALL_HEADERS (variable length),
-	// then the SQL text in UTF-16 LE.
-	// Skip ALL_HEADERS: first 4 bytes are total length of ALL_HEADERS.
+	// O payload do SQL Batch começa com ALL_HEADERS (tamanho variável),
+	// seguido do texto SQL em UTF-16 LE.
+	// Pular ALL_HEADERS: os primeiros 4 bytes são o tamanho total de ALL_HEADERS.
 	text := extractSQLText(payload)
 	if text == "" {
 		return PinResult{Action: PinActionNone}
@@ -70,7 +70,7 @@ func inspectSQLBatch(payload []byte) PinResult {
 
 	upper := strings.ToUpper(strings.TrimSpace(text))
 
-	// Check for transaction start.
+	// Verificar início de transação.
 	if hasPrefix(upper, "BEGIN TRAN") ||
 		hasPrefix(upper, "BEGIN DISTRIBUTED TRAN") ||
 		hasPrefix(upper, "SET IMPLICIT_TRANSACTIONS ON") ||
@@ -78,13 +78,13 @@ func inspectSQLBatch(payload []byte) PinResult {
 		return PinResult{Action: PinActionPin, Reason: "transaction"}
 	}
 
-	// Check for transaction end.
+	// Verificar fim de transação.
 	if hasPrefix(upper, "COMMIT") ||
 		hasPrefix(upper, "ROLLBACK") {
 		return PinResult{Action: PinActionUnpin, Reason: "transaction"}
 	}
 
-	// Check for temp table creation (pins for session lifetime).
+	// Verificar criação de tabela temporária (pina pelo tempo de vida da sessão).
 	if strings.Contains(upper, "CREATE TABLE #") ||
 		strings.Contains(upper, "SELECT INTO #") {
 		return PinResult{Action: PinActionPin, Reason: "temp_table"}
@@ -93,8 +93,8 @@ func inspectSQLBatch(payload []byte) PinResult {
 	return PinResult{Action: PinActionNone}
 }
 
-// inspectRPC looks for prepared statement operations in RPC requests.
-// RPC payload: ALL_HEADERS + ProcIDSwitch + ProcNameOrID + ...
+// inspectRPC procura operações de prepared statement em requisições RPC.
+// Payload RPC: ALL_HEADERS + ProcIDSwitch + ProcNameOrID + ...
 func inspectRPC(payload []byte) PinResult {
 	procName := extractRPCProcName(payload)
 	if procName == "" {
@@ -109,17 +109,17 @@ func inspectRPC(payload []byte) PinResult {
 	case "SP_UNPREPARE", "SP_CURSORCLOSE":
 		return PinResult{Action: PinActionUnpin, Reason: "prepared"}
 	case "SP_EXECUTESQL", "SP_EXECUTE":
-		// These don't change pin state — they execute within an existing state.
+		// Estes não alteram o estado de pin — executam dentro de um estado existente.
 		return PinResult{Action: PinActionNone}
 	}
 
 	return PinResult{Action: PinActionNone}
 }
 
-// inspectTransactionManager inspects TRANSACTION_MANAGER packets.
+// inspectTransactionManager inspeciona pacotes TRANSACTION_MANAGER.
 // Payload: ALL_HEADERS + RequestType (2 bytes LE) + ...
 func inspectTransactionManager(payload []byte) PinResult {
-	// Skip ALL_HEADERS.
+	// Pular ALL_HEADERS.
 	offset := skipAllHeaders(payload)
 	if offset < 0 || offset+2 > len(payload) {
 		return PinResult{Action: PinActionNone}
@@ -133,31 +133,31 @@ func inspectTransactionManager(payload []byte) PinResult {
 	case tmCommitXact, tmRollbackXact:
 		return PinResult{Action: PinActionUnpin, Reason: "transaction"}
 	case tmSavepoint:
-		// Savepoint within a transaction — keep pinned.
+		// Savepoint dentro de uma transação — manter pinado.
 		return PinResult{Action: PinActionNone}
 	}
 
 	return PinResult{Action: PinActionNone}
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────
+// ── Auxiliares ───────────────────────────────────────────────────────────
 
-// skipAllHeaders skips the ALL_HEADERS section at the start of a payload.
-// Returns the offset after ALL_HEADERS, or -1 on error.
+// skipAllHeaders pula a seção ALL_HEADERS no início de um payload.
+// Retorna o offset após ALL_HEADERS, ou -1 em caso de erro.
 func skipAllHeaders(payload []byte) int {
 	if len(payload) < 4 {
 		return -1
 	}
 	totalLen := int(binary.LittleEndian.Uint32(payload[0:4]))
 	if totalLen < 4 || totalLen > len(payload) {
-		// No ALL_HEADERS or invalid — treat entire payload as content.
+		// Sem ALL_HEADERS ou inválido — tratar o payload inteiro como conteúdo.
 		return 0
 	}
 	return totalLen
 }
 
-// extractSQLText extracts the SQL text from a SQL_BATCH payload.
-// The text follows ALL_HEADERS and is encoded in UTF-16 LE.
+// extractSQLText extrai o texto SQL de um payload SQL_BATCH.
+// O texto segue ALL_HEADERS e é codificado em UTF-16 LE.
 func extractSQLText(payload []byte) string {
 	offset := skipAllHeaders(payload)
 	if offset < 0 || offset >= len(payload) {
@@ -169,13 +169,13 @@ func extractSQLText(payload []byte) string {
 		return ""
 	}
 
-	// Decode UTF-16 LE — only decode enough for pinning detection.
-	// Limit to first 256 characters for performance.
+	// Decodificar UTF-16 LE — decodificar apenas o suficiente para detecção de pinning.
+	// Limitar aos primeiros 256 caracteres por performance.
 	maxBytes := len(textBytes)
 	if maxBytes > 512 { // 256 chars * 2 bytes
 		maxBytes = 512
 	}
-	// Ensure even number of bytes.
+	// Garantir número par de bytes.
 	if maxBytes%2 != 0 {
 		maxBytes--
 	}
@@ -192,12 +192,12 @@ func extractSQLText(payload []byte) string {
 	return string(utf16.Decode(u16))
 }
 
-// extractRPCProcName extracts the procedure name from an RPC Request payload.
+// extractRPCProcName extrai o nome do procedimento de um payload de RPC Request.
 //
-// RPC Request layout (after ALL_HEADERS):
+// Layout do RPC Request (após ALL_HEADERS):
 //   Byte 0-1:    NameLenProcID (USHORT)
-//                 If == 0xFFFF → ProcID (USHORT) follows (well-known proc by ID)
-//                 Else → procedure name of this many UTF-16 LE characters follows
+//                 Se == 0xFFFF → ProcID (USHORT) segue (procedimento bem conhecido por ID)
+//                 Senão → nome do procedimento com essa quantidade de caracteres UTF-16 LE
 func extractRPCProcName(payload []byte) string {
 	offset := skipAllHeaders(payload)
 	if offset < 0 || offset+2 > len(payload) {
@@ -208,7 +208,7 @@ func extractRPCProcName(payload []byte) string {
 	offset += 2
 
 	if nameLenOrFlag == 0xFFFF {
-		// Well-known procedure by ID.
+		// Procedimento bem conhecido por ID.
 		if offset+2 > len(payload) {
 			return ""
 		}
@@ -216,7 +216,7 @@ func extractRPCProcName(payload []byte) string {
 		return wellKnownProcName(procID)
 	}
 
-	// Named procedure: nameLenOrFlag is the number of UTF-16 chars.
+	// Procedimento nomeado: nameLenOrFlag é o número de caracteres UTF-16.
 	charCount := int(nameLenOrFlag)
 	byteCount := charCount * 2
 	if offset+byteCount > len(payload) {
@@ -231,8 +231,8 @@ func extractRPCProcName(payload []byte) string {
 	return string(utf16.Decode(u16))
 }
 
-// wellKnownProcName returns the name for a well-known RPC procedure ID.
-// Reference: MS-TDS 2.2.6.6
+// wellKnownProcName retorna o nome de um procedimento RPC bem conhecido pelo seu ID.
+// Referência: MS-TDS 2.2.6.6
 func wellKnownProcName(id uint16) string {
 	switch id {
 	case 1:
@@ -270,12 +270,12 @@ func wellKnownProcName(id uint16) string {
 	}
 }
 
-// hasPrefix checks if s starts with prefix, handling word boundaries.
+// hasPrefix verifica se s começa com prefix, respeitando limites de palavras.
 func hasPrefix(s, prefix string) bool {
 	if !strings.HasPrefix(s, prefix) {
 		return false
 	}
-	// Make sure it's a word boundary (not a substring of a longer word).
+	// Garantir que é um limite de palavra (não uma substring de uma palavra maior).
 	if len(s) > len(prefix) {
 		next := s[len(prefix)]
 		return next == ' ' || next == '\t' || next == '\n' || next == '\r' ||
@@ -284,14 +284,14 @@ func hasPrefix(s, prefix string) bool {
 	return true
 }
 
-// ── Attention Detection ─────────────────────────────────────────────────
+// ── Detecção de Attention ───────────────────────────────────────────────
 
-// IsAttention returns true if this is an Attention (cancel) packet.
+// IsAttention retorna true se este for um pacote Attention (cancelamento).
 func IsAttention(pktType PacketType) bool {
 	return pktType == PacketAttention
 }
 
-// BuildAttention creates an Attention packet (just header, no payload).
+// BuildAttention cria um pacote Attention (apenas header, sem payload).
 func BuildAttention() []byte {
 	hdr := Header{
 		Type:   PacketAttention,
@@ -301,9 +301,9 @@ func BuildAttention() []byte {
 	return hdr.Marshal()
 }
 
-// ── Response inspection ─────────────────────────────────────────────────
+// ── Inspeção de Resposta ────────────────────────────────────────────────
 
-// Token types in TDS response (MS-TDS 2.2.7).
+// Tipos de token em resposta TDS (MS-TDS 2.2.7).
 const (
 	tokenEnvChange byte = 0xE3
 	tokenDone      byte = 0xFD
@@ -311,19 +311,19 @@ const (
 	tokenDoneInProc byte = 0xFF
 )
 
-// DONE status flags (MS-TDS 2.2.7.6).
+// Flags de status DONE (MS-TDS 2.2.7.6).
 const (
 	doneMore       uint16 = 0x0001
 	doneError      uint16 = 0x0002
-	doneInxact     uint16 = 0x0004 // Transaction in progress
+	doneInxact     uint16 = 0x0004 // Transação em progresso
 	doneCount      uint16 = 0x0010
 	doneAttn       uint16 = 0x0020
 	doneSrvError   uint16 = 0x0100
 )
 
-// InspectResponse scans a server response payload for transaction state changes.
-// It looks at ENVCHANGE tokens (type 8 = begin tran, type 9 = commit tran,
-// type 10 = rollback tran) and DONE tokens with DONE_INXACT flag.
+// InspectResponse varre o payload de resposta do servidor em busca de mudanças de estado transacional.
+// Analisa tokens ENVCHANGE (tipo 8 = begin tran, tipo 9 = commit tran,
+// tipo 10 = rollback tran) e tokens DONE com a flag DONE_INXACT.
 func InspectResponse(payload []byte) PinResult {
 	result := PinResult{Action: PinActionNone}
 
@@ -350,7 +350,7 @@ func InspectResponse(payload []byte) PinResult {
 			i += 3 + envLen
 
 		case tokenDone, tokenDoneProc, tokenDoneInProc:
-			// DONE token is always 12 bytes (1 token + 2 status + 2 curcmd + 8 rowcount).
+			// Token DONE sempre tem 12 bytes (1 token + 2 status + 2 curcmd + 8 rowcount).
 			if i+5 > len(payload) {
 				return result
 			}
@@ -358,8 +358,8 @@ func InspectResponse(payload []byte) PinResult {
 			i += 13
 
 		default:
-			// Skip unknown tokens — we can't reliably parse all token types,
-			// so we stop scanning to avoid misinterpreting data.
+			// Pular tokens desconhecidos — não é possível parsear todos os tipos de token
+			// de forma confiável, então paramos para evitar interpretar dados incorretamente.
 			return result
 		}
 	}
@@ -367,8 +367,8 @@ func InspectResponse(payload []byte) PinResult {
 	return result
 }
 
-// ContainsAttentionAck checks if a response payload contains a DONE token
-// with the DONE_ATTN flag set (acknowledgement of an Attention signal).
+// ContainsAttentionAck verifica se o payload de resposta contém um token DONE
+// com a flag DONE_ATTN ativada (confirmação de um sinal Attention).
 func ContainsAttentionAck(payload []byte) bool {
-	return bytes.Contains(payload, []byte{tokenDone}) // Simplified check.
+	return bytes.Contains(payload, []byte{tokenDone}) // Verificação simplificada.
 }

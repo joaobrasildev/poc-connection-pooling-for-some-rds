@@ -1,5 +1,5 @@
-// Package health provides health check functionality for all infrastructure components.
-// It verifies connectivity to SQL Server instances (buckets) and Redis.
+// Package health fornece funcionalidade de health check para todos os componentes de infraestrutura.
+// Verifica conectividade com instâncias SQL Server (buckets) e Redis.
 package health
 
 import (
@@ -18,7 +18,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// Status represents the health status of a component.
+// Status representa o status de saúde de um componente.
 type Status string
 
 const (
@@ -26,7 +26,7 @@ const (
 	StatusUnhealthy Status = "unhealthy"
 )
 
-// ComponentHealth represents the health of a single component.
+// ComponentHealth representa a saúde de um único componente.
 type ComponentHealth struct {
 	Name    string `json:"name"`
 	Status  Status `json:"status"`
@@ -34,7 +34,7 @@ type ComponentHealth struct {
 	Latency string `json:"latency"`
 }
 
-// HealthReport is the overall health report.
+// HealthReport é o relatório geral de saúde.
 type HealthReport struct {
 	Status     Status            `json:"status"`
 	Timestamp  string            `json:"timestamp"`
@@ -42,13 +42,13 @@ type HealthReport struct {
 	Components []ComponentHealth `json:"components"`
 }
 
-// Checker performs health checks against infrastructure components.
+// Checker realiza health checks contra componentes de infraestrutura.
 type Checker struct {
 	cfg         *config.Config
 	redisClient *redis.Client
 }
 
-// NewChecker creates a new health checker.
+// NewChecker cria um novo health checker.
 func NewChecker(cfg *config.Config) *Checker {
 	rdb := redis.NewClient(&redis.Options{
 		Addr:         cfg.Redis.Addr,
@@ -65,12 +65,12 @@ func NewChecker(cfg *config.Config) *Checker {
 	}
 }
 
-// Close cleans up resources.
+// Close limpa os recursos.
 func (c *Checker) Close() error {
 	return c.redisClient.Close()
 }
 
-// Check performs health checks on all components and returns a report.
+// Check realiza health checks em todos os componentes e retorna um relatório.
 func (c *Checker) Check(ctx context.Context) *HealthReport {
 	report := &HealthReport{
 		Status:     StatusHealthy,
@@ -84,7 +84,7 @@ func (c *Checker) Check(ctx context.Context) *HealthReport {
 		components []ComponentHealth
 	)
 
-	// Check Redis
+	// Verificar Redis
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -94,7 +94,7 @@ func (c *Checker) Check(ctx context.Context) *HealthReport {
 		mu.Unlock()
 	}()
 
-	// Check each SQL Server bucket
+	// Verificar cada bucket SQL Server
 	for i := range c.cfg.Buckets {
 		b := &c.cfg.Buckets[i]
 		wg.Add(1)
@@ -111,7 +111,7 @@ func (c *Checker) Check(ctx context.Context) *HealthReport {
 
 	report.Components = components
 
-	// If any component is unhealthy, mark overall as unhealthy
+	// Se qualquer componente estiver unhealthy, marcar geral como unhealthy
 	for _, comp := range components {
 		if comp.Status == StatusUnhealthy {
 			report.Status = StatusUnhealthy
@@ -122,7 +122,7 @@ func (c *Checker) Check(ctx context.Context) *HealthReport {
 	return report
 }
 
-// checkRedis verifies connectivity to Redis.
+// checkRedis verifica a conectividade com o Redis.
 func (c *Checker) checkRedis(ctx context.Context) ComponentHealth {
 	start := time.Now()
 
@@ -149,7 +149,7 @@ func (c *Checker) checkRedis(ctx context.Context) ComponentHealth {
 	}
 }
 
-// checkSQLServer verifies connectivity to a SQL Server instance.
+// checkSQLServer verifica a conectividade com uma instância SQL Server.
 func (c *Checker) checkSQLServer(ctx context.Context, b *bucket.Bucket) ComponentHealth {
 	start := time.Now()
 	name := fmt.Sprintf("sqlserver-%s", b.ID)
@@ -168,7 +168,7 @@ func (c *Checker) checkSQLServer(ctx context.Context, b *bucket.Bucket) Componen
 	}
 	defer db.Close()
 
-	// Test connectivity with SELECT 1
+	// Testar conectividade com SELECT 1
 	var result int
 	err = db.QueryRowContext(ctx, "SELECT 1").Scan(&result)
 	latency := time.Since(start)
@@ -182,7 +182,7 @@ func (c *Checker) checkSQLServer(ctx context.Context, b *bucket.Bucket) Componen
 		}
 	}
 
-	// Also check server version
+	// Também verificar versão do servidor
 	var version string
 	err = db.QueryRowContext(ctx, "SELECT @@VERSION").Scan(&version)
 	if err != nil {
@@ -194,7 +194,7 @@ func (c *Checker) checkSQLServer(ctx context.Context, b *bucket.Bucket) Componen
 		}
 	}
 
-	// Truncate version string for readability
+	// Truncar string de versão para legibilidade
 	if len(version) > 80 {
 		version = version[:80] + "..."
 	}
@@ -207,7 +207,7 @@ func (c *Checker) checkSQLServer(ctx context.Context, b *bucket.Bucket) Componen
 	}
 }
 
-// ServeHTTP starts the health check HTTP server.
+// ServeHTTP inicia o servidor HTTP de health check.
 func (c *Checker) ServeHTTP(ctx context.Context) *http.Server {
 	mux := http.NewServeMux()
 

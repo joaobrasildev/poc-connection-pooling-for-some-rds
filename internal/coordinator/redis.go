@@ -1,11 +1,11 @@
-// Package coordinator implements distributed coordination via Redis
-// for connection pooling across multiple proxy instances.
+// Package coordinator implementa coordenação distribuída via Redis
+// para connection pooling entre múltiplas instâncias de proxy.
 //
-// It provides:
-//   - Atomic acquire/release of connection slots using Lua scripts
-//   - Per-instance connection tracking for auditability
-//   - Fallback mode when Redis is unavailable (local limits)
-//   - Pub/Sub notifications for cross-instance queue wakeup
+// Fornece:
+//   - Acquire/release atômico de slots de conexão usando scripts Lua
+//   - Rastreamento de conexões por instância para auditabilidade
+//   - Modo fallback quando o Redis está indisponível (limites locais)
+//   - Notificações Pub/Sub para wakeup de filas entre instâncias
 package coordinator
 
 import (
@@ -27,43 +27,43 @@ var acquireLuaScript string
 //go:embed lua/release.lua
 var releaseLuaScript string
 
-// ── Redis Key Patterns ──────────────────────────────────────────────────
+// ── Padrões de Chaves Redis ──────────────────────────────────────────────
 const (
-	keyBucketCount  = "proxy:bucket:%s:count"    // global connection count per bucket
-	keyBucketMax    = "proxy:bucket:%s:max"       // max connections per bucket
-	keyInstanceConn = "proxy:instance:%s:conns"   // hash: bucket_id → local count
-	keyInstanceHB   = "proxy:instance:%s:heartbeat" // heartbeat key with TTL
-	keyInstanceList = "proxy:instances"            // set of active instance IDs
-	channelRelease  = "proxy:release:%s"           // Pub/Sub channel per bucket
+	keyBucketCount  = "proxy:bucket:%s:count"    // contagem global de conexões por bucket
+	keyBucketMax    = "proxy:bucket:%s:max"       // máximo de conexões por bucket
+	keyInstanceConn = "proxy:instance:%s:conns"   // hash: bucket_id → contagem local
+	keyInstanceHB   = "proxy:instance:%s:heartbeat" // chave de heartbeat com TTL
+	keyInstanceList = "proxy:instances"            // conjunto de IDs de instâncias ativas
+	channelRelease  = "proxy:release:%s"           // canal Pub/Sub por bucket
 )
 
-// RedisCoordinator manages distributed connection limits via Redis.
+// RedisCoordinator gerencia limites distribuídos de conexão via Redis.
 type RedisCoordinator struct {
 	client     redis.UniversalClient
 	cfg        *config.Config
 	instanceID string
 
-	// Lua script SHA hashes (loaded once at startup).
+	// Hashes SHA dos scripts Lua (carregados uma vez na inicialização).
 	acquireSHA string
 	releaseSHA string
 
-	// fallback tracks whether Redis is unavailable and we're in local mode.
+	// fallback rastreia se o Redis está indisponível e estamos em modo local.
 	fallbackMode atomic.Bool
 
-	// fallbackCounts tracks local connection counts per bucket in fallback mode.
+	// fallbackCounts rastreia contagens locais de conexão por bucket em modo fallback.
 	fallbackMu     sync.Mutex
 	fallbackCounts map[string]int
 
-	// subscribers holds Pub/Sub subscriptions per bucket.
+	// subscribers mantém assinaturas Pub/Sub por bucket.
 	subMu       sync.Mutex
 	subscribers map[string]*redis.PubSub
 
-	// lifecycle
+	// ciclo de vida
 	stopCh chan struct{}
 	wg     sync.WaitGroup
 }
 
-// NewRedisCoordinator creates and initializes the distributed coordinator.
+// NewRedisCoordinator cria e inicializa o coordenador distribuído.
 func NewRedisCoordinator(ctx context.Context, cfg *config.Config) (*RedisCoordinator, error) {
 	client := redis.NewClient(&redis.Options{
 		Addr:         cfg.Redis.Addr,
@@ -84,7 +84,7 @@ func NewRedisCoordinator(ctx context.Context, cfg *config.Config) (*RedisCoordin
 		stopCh:         make(chan struct{}),
 	}
 
-	// Test Redis connectivity.
+	// Testar conectividade com o Redis.
 	pingCtx, cancel := context.WithTimeout(ctx, cfg.Redis.DialTimeout)
 	defer cancel()
 
@@ -100,17 +100,17 @@ func NewRedisCoordinator(ctx context.Context, cfg *config.Config) (*RedisCoordin
 	metrics.RedisOperations.WithLabelValues("ping", "ok").Inc()
 	log.Printf("[coordinator] Redis connected: %s", cfg.Redis.Addr)
 
-	// Load Lua scripts.
+	// Carregar scripts Lua.
 	if err := rc.loadScripts(ctx); err != nil {
 		return nil, fmt.Errorf("loading lua scripts: %w", err)
 	}
 
-	// Register bucket max connections.
+	// Registrar máximo de conexões por bucket.
 	if err := rc.initBucketLimits(ctx); err != nil {
 		return nil, fmt.Errorf("initializing bucket limits: %w", err)
 	}
 
-	// Register this instance.
+	// Registrar esta instância.
 	if err := rc.registerInstance(ctx); err != nil {
 		return nil, fmt.Errorf("registering instance: %w", err)
 	}
@@ -121,7 +121,7 @@ func NewRedisCoordinator(ctx context.Context, cfg *config.Config) (*RedisCoordin
 	return rc, nil
 }
 
-// loadScripts loads the Lua scripts into Redis and caches their SHA hashes.
+// loadScripts carrega os scripts Lua no Redis e armazena em cache seus hashes SHA.
 func (rc *RedisCoordinator) loadScripts(ctx context.Context) error {
 	sha, err := rc.client.ScriptLoad(ctx, acquireLuaScript).Result()
 	if err != nil {
@@ -140,14 +140,14 @@ func (rc *RedisCoordinator) loadScripts(ctx context.Context) error {
 	return nil
 }
 
-// initBucketLimits sets the max connection count for each bucket in Redis.
+// initBucketLimits define a contagem máxima de conexões para cada bucket no Redis.
 func (rc *RedisCoordinator) initBucketLimits(ctx context.Context) error {
 	pipe := rc.client.Pipeline()
 	for _, b := range rc.cfg.Buckets {
 		maxKey := fmt.Sprintf(keyBucketMax, b.ID)
 		pipe.Set(ctx, maxKey, b.MaxConnections, 0)
 
-		// Initialize count key if it doesn't exist.
+		// Inicializar chave de contagem se não existir.
 		countKey := fmt.Sprintf(keyBucketCount, b.ID)
 		pipe.SetNX(ctx, countKey, 0, 0)
 	}
@@ -158,12 +158,12 @@ func (rc *RedisCoordinator) initBucketLimits(ctx context.Context) error {
 	return nil
 }
 
-// registerInstance adds this instance to the active instances set.
+// registerInstance adiciona esta instância ao conjunto de instâncias ativas.
 func (rc *RedisCoordinator) registerInstance(ctx context.Context) error {
 	pipe := rc.client.Pipeline()
 	pipe.SAdd(ctx, keyInstanceList, rc.instanceID)
 
-	// Initialize per-instance connection hash.
+	// Inicializar hash de conexões por instância.
 	instKey := fmt.Sprintf(keyInstanceConn, rc.instanceID)
 	for _, b := range rc.cfg.Buckets {
 		pipe.HSetNX(ctx, instKey, b.ID, 0)
@@ -175,8 +175,8 @@ func (rc *RedisCoordinator) registerInstance(ctx context.Context) error {
 
 // ── Acquire / Release ───────────────────────────────────────────────────
 
-// Acquire atomically increments the global connection count for a bucket.
-// Returns nil if the slot was acquired, or an error if at capacity or Redis fails.
+// Acquire incrementa atomicamente a contagem global de conexões de um bucket.
+// Retorna nil se o slot foi adquirido, ou um erro se estiver na capacidade máxima ou o Redis falhar.
 func (rc *RedisCoordinator) Acquire(ctx context.Context, bucketID string) error {
 	if rc.fallbackMode.Load() {
 		return rc.acquireFallback(bucketID)
@@ -193,7 +193,7 @@ func (rc *RedisCoordinator) Acquire(ctx context.Context, bucketID string) error 
 
 	if err != nil {
 		metrics.RedisOperations.WithLabelValues("acquire", "error").Inc()
-		// If Redis fails, try fallback.
+		// Se o Redis falhar, tentar fallback.
 		if rc.cfg.Fallback.Enabled {
 			log.Printf("[coordinator] Redis acquire failed (%v), falling back to local", err)
 			rc.enterFallback()
@@ -214,8 +214,8 @@ func (rc *RedisCoordinator) Acquire(ctx context.Context, bucketID string) error 
 	return nil
 }
 
-// Release atomically decrements the global connection count for a bucket
-// and publishes a notification for waiting instances.
+// Release decrementa atomicamente a contagem global de conexões de um bucket
+// e publica uma notificação para instâncias em espera.
 func (rc *RedisCoordinator) Release(ctx context.Context, bucketID string) error {
 	if rc.fallbackMode.Load() {
 		rc.releaseFallback(bucketID)
@@ -245,14 +245,14 @@ func (rc *RedisCoordinator) Release(ctx context.Context, bucketID string) error 
 	return nil
 }
 
-// ── Pub/Sub for Cross-Instance Notifications ────────────────────────────
+// ── Pub/Sub para Notificações Entre Instâncias ─────────────────────────
 
-// Subscribe creates a Pub/Sub subscription for a bucket's release notifications.
-// Returns a channel that receives the bucket ID whenever a connection is released
-// by any instance.
+// Subscribe cria uma assinatura Pub/Sub para notificações de release de um bucket.
+// Retorna um channel que recebe o ID do bucket sempre que uma conexão é liberada
+// por qualquer instância.
 func (rc *RedisCoordinator) Subscribe(ctx context.Context, bucketID string) (<-chan string, error) {
 	if rc.fallbackMode.Load() {
-		// In fallback mode, return a closed channel (no cross-instance coordination).
+		// Em modo fallback, retornar um channel fechado (sem coordenação entre instâncias).
 		ch := make(chan string)
 		close(ch)
 		return ch, nil
@@ -284,7 +284,7 @@ func (rc *RedisCoordinator) Subscribe(ctx context.Context, bucketID string) (<-c
 				select {
 				case notifyCh <- msg.Payload:
 				default:
-					// Drop if consumer is slow (anti-thundering-herd).
+					// Descartar se o consumidor estiver lento (anti-thundering-herd).
 				}
 			}
 		}
@@ -293,7 +293,7 @@ func (rc *RedisCoordinator) Subscribe(ctx context.Context, bucketID string) (<-c
 	return notifyCh, nil
 }
 
-// ── Fallback Mode ───────────────────────────────────────────────────────
+// ── Modo Fallback ───────────────────────────────────────────────────────
 
 func (rc *RedisCoordinator) enterFallback() {
 	if rc.fallbackMode.CompareAndSwap(false, true) {
@@ -302,21 +302,21 @@ func (rc *RedisCoordinator) enterFallback() {
 	}
 }
 
-// ExitFallback attempts to reconnect to Redis and leave fallback mode.
+// ExitFallback tenta reconectar ao Redis e sair do modo fallback.
 func (rc *RedisCoordinator) ExitFallback(ctx context.Context) error {
 	if err := rc.client.Ping(ctx).Err(); err != nil {
 		return err
 	}
 
-	// Re-load scripts (may have been flushed).
+	// Recarregar scripts (podem ter sido removidos por flush).
 	if err := rc.loadScripts(ctx); err != nil {
 		return err
 	}
 
-	// Reconcile: sync local counts to Redis.
+	// Reconciliar: sincronizar contagens locais com o Redis.
 	if err := rc.reconcileCounts(ctx); err != nil {
 		log.Printf("[coordinator] Reconciliation failed: %v", err)
-		// Don't exit fallback if reconciliation fails.
+		// Não sair do fallback se a reconciliação falhar.
 		return err
 	}
 
@@ -326,7 +326,7 @@ func (rc *RedisCoordinator) ExitFallback(ctx context.Context) error {
 	return nil
 }
 
-// IsFallback returns true if the coordinator is in fallback mode.
+// IsFallback retorna true se o coordenador estiver em modo fallback.
 func (rc *RedisCoordinator) IsFallback() bool {
 	return rc.fallbackMode.Load()
 }
@@ -356,7 +356,7 @@ func (rc *RedisCoordinator) releaseFallback(bucketID string) {
 	}
 }
 
-// localLimit calculates the per-instance connection limit for fallback mode.
+// localLimit calcula o limite de conexões por instância para o modo fallback.
 func (rc *RedisCoordinator) localLimit(bucketID string) int {
 	for _, b := range rc.cfg.Buckets {
 		if b.ID == bucketID {
@@ -374,7 +374,7 @@ func (rc *RedisCoordinator) localLimit(bucketID string) int {
 	return 1
 }
 
-// reconcileCounts syncs local fallback counts to Redis after reconnection.
+// reconcileCounts sincroniza contagens locais do fallback com o Redis após reconexão.
 func (rc *RedisCoordinator) reconcileCounts(ctx context.Context) error {
 	rc.fallbackMu.Lock()
 	counts := make(map[string]int, len(rc.fallbackCounts))
@@ -399,9 +399,9 @@ func (rc *RedisCoordinator) reconcileCounts(ctx context.Context) error {
 	return nil
 }
 
-// ── Query Methods ───────────────────────────────────────────────────────
+// ── Métodos de Consulta ─────────────────────────────────────────────────
 
-// GlobalCount returns the current global connection count for a bucket.
+// GlobalCount retorna a contagem global atual de conexões de um bucket.
 func (rc *RedisCoordinator) GlobalCount(ctx context.Context, bucketID string) (int, error) {
 	if rc.fallbackMode.Load() {
 		rc.fallbackMu.Lock()
@@ -417,7 +417,7 @@ func (rc *RedisCoordinator) GlobalCount(ctx context.Context, bucketID string) (i
 	return val, err
 }
 
-// InstanceCounts returns the per-bucket connection counts for a specific instance.
+// InstanceCounts retorna as contagens de conexão por bucket para uma instância específica.
 func (rc *RedisCoordinator) InstanceCounts(ctx context.Context, instanceID string) (map[string]int, error) {
 	instKey := fmt.Sprintf(keyInstanceConn, instanceID)
 	result, err := rc.client.HGetAll(ctx, instKey).Result()
@@ -434,18 +434,18 @@ func (rc *RedisCoordinator) InstanceCounts(ctx context.Context, instanceID strin
 	return counts, nil
 }
 
-// ActiveInstances returns the set of active instance IDs.
+// ActiveInstances retorna o conjunto de IDs de instâncias ativas.
 func (rc *RedisCoordinator) ActiveInstances(ctx context.Context) ([]string, error) {
 	return rc.client.SMembers(ctx, keyInstanceList).Result()
 }
 
-// ── Lifecycle ───────────────────────────────────────────────────────────
+// ── Ciclo de Vida ───────────────────────────────────────────────────────
 
-// Close shuts down the coordinator, unregisters the instance, and closes Redis.
+// Close encerra o coordenador, desregistra a instância e fecha a conexão Redis.
 func (rc *RedisCoordinator) Close(ctx context.Context) error {
 	close(rc.stopCh)
 
-	// Close all Pub/Sub subscriptions.
+	// Fechar todas as assinaturas Pub/Sub.
 	rc.subMu.Lock()
 	for _, sub := range rc.subscribers {
 		sub.Close()
@@ -455,7 +455,7 @@ func (rc *RedisCoordinator) Close(ctx context.Context) error {
 
 	rc.wg.Wait()
 
-	// Unregister instance.
+	// Desregistrar instância.
 	if !rc.fallbackMode.Load() {
 		rc.client.SRem(ctx, keyInstanceList, rc.instanceID)
 		instKey := fmt.Sprintf(keyInstanceConn, rc.instanceID)
@@ -468,12 +468,12 @@ func (rc *RedisCoordinator) Close(ctx context.Context) error {
 	return rc.client.Close()
 }
 
-// Client returns the underlying Redis client (for heartbeat and other internal use).
+// Client retorna o cliente Redis subjacente (para heartbeat e outros usos internos).
 func (rc *RedisCoordinator) Client() redis.UniversalClient {
 	return rc.client
 }
 
-// InstanceID returns this coordinator's instance ID.
+// InstanceID retorna o ID de instância deste coordenador.
 func (rc *RedisCoordinator) InstanceID() string {
 	return rc.instanceID
 }

@@ -1,11 +1,11 @@
-// Package tds implements a minimal parser for the TDS (Tabular Data Stream)
-// wire protocol used by Microsoft SQL Server.
+// Package tds implementa um parser mínimo para o protocolo de rede TDS (Tabular Data Stream)
+// usado pelo Microsoft SQL Server.
 //
-// Reference: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-tds/
+// Referência: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-tds/
 //
-// The proxy only needs to parse packet headers and a small subset of packet
-// contents (Pre-Login, Login7) for routing and pinning detection. All other
-// data is forwarded as opaque bytes.
+// O proxy só precisa parsear headers de pacote e um pequeno subconjunto do
+// conteúdo dos pacotes (Pre-Login, Login7) para roteamento e detecção de pinning.
+// Todos os outros dados são encaminhados como bytes opacos.
 package tds
 
 import (
@@ -14,25 +14,25 @@ import (
 	"io"
 )
 
-// ── TDS Packet Types (MS-TDS 2.2.3.1) ─────────────────────────────────
+// ── Tipos de Pacote TDS (MS-TDS 2.2.3.1) ─────────────────────────────────
 
-// PacketType is the first byte of a TDS packet header.
+// PacketType é o primeiro byte de um header de pacote TDS.
 type PacketType byte
 
 const (
 	PacketSQLBatch   PacketType = 0x01 // SQL Batch
-	PacketRPCRequest PacketType = 0x03 // RPC Request
-	PacketReply      PacketType = 0x04 // Tabular Result (server → client)
-	PacketAttention  PacketType = 0x06 // Attention (cancel)
-	PacketBulkLoad   PacketType = 0x07 // Bulk Load
-	PacketTransMgr   PacketType = 0x0E // Transaction Manager Request
+	PacketRPCRequest PacketType = 0x03 // Requisição RPC
+	PacketReply      PacketType = 0x04 // Resultado tabular (servidor → cliente)
+	PacketAttention  PacketType = 0x06 // Attention (cancelamento)
+	PacketBulkLoad   PacketType = 0x07 // Carga em massa
+	PacketTransMgr   PacketType = 0x0E // Requisição do Transaction Manager
 	PacketPreLogin   PacketType = 0x12 // Pre-Login
 	PacketLogin7     PacketType = 0x10 // Login7
-	PacketSSPI       PacketType = 0x11 // SSPI auth
-	PacketPreLoginR  PacketType = 0x04 // Pre-Login Response (same as Reply)
+	PacketSSPI       PacketType = 0x11 // Autenticação SSPI
+	PacketPreLoginR  PacketType = 0x04 // Resposta Pre-Login (mesmo que Reply)
 )
 
-// String returns a human-readable name for the packet type.
+// String retorna um nome legível para o tipo de pacote.
 func (t PacketType) String() string {
 	switch t {
 	case PacketSQLBatch:
@@ -58,49 +58,49 @@ func (t PacketType) String() string {
 	}
 }
 
-// ── TDS Packet Status (MS-TDS 2.2.3.1.2) ─────────────────────────────
+// ── Status de Pacote TDS (MS-TDS 2.2.3.1.2) ─────────────────────────────
 
-// PacketStatus flags.
+// Flags de PacketStatus.
 const (
 	StatusNormal         byte = 0x00
-	StatusEOM            byte = 0x01 // End of message
+	StatusEOM            byte = 0x01 // Fim da mensagem
 	StatusIgnore         byte = 0x02
-	StatusResetConn      byte = 0x08 // Reset connection (sp_reset_connection)
-	StatusResetConnSkip  byte = 0x10 // Reset with skip tran
+	StatusResetConn      byte = 0x08 // Reset de conexão (sp_reset_connection)
+	StatusResetConnSkip  byte = 0x10 // Reset com skip tran
 )
 
-// ── TDS Header (8 bytes) ──────────────────────────────────────────────
+// ── Header TDS (8 bytes) ──────────────────────────────────────────────
 
-// HeaderSize is the fixed size of a TDS packet header.
+// HeaderSize é o tamanho fixo de um header de pacote TDS.
 const HeaderSize = 8
 
-// MaxPacketSize is the maximum TDS packet size (32 KB per spec default,
-// but can be negotiated up to 32767 bytes).
+// MaxPacketSize é o tamanho máximo de um pacote TDS (32 KB por padrão da spec,
+// mas pode ser negociado até 32767 bytes).
 const MaxPacketSize = 32768
 
-// Header represents the 8-byte TDS packet header.
+// Header representa o header de 8 bytes de um pacote TDS.
 //
 //	Byte 0:   Type
 //	Byte 1:   Status
-//	Byte 2-3: Length (including header, big-endian)
-//	Byte 4-5: SPID (server process ID, big-endian)
-//	Byte 6:   PacketID (sequential counter)
-//	Byte 7:   Window (unused, always 0)
+//	Byte 2-3: Length (incluindo header, big-endian)
+//	Byte 4-5: SPID (ID do processo no servidor, big-endian)
+//	Byte 6:   PacketID (contador sequencial)
+//	Byte 7:   Window (não utilizado, sempre 0)
 type Header struct {
 	Type     PacketType
 	Status   byte
-	Length   uint16 // Total packet length including header
+	Length   uint16 // Tamanho total do pacote incluindo header
 	SPID     uint16
 	PacketID byte
 	Window   byte
 }
 
-// IsEOM returns true if this is the last packet in a message.
+// IsEOM retorna true se este for o último pacote de uma mensagem.
 func (h *Header) IsEOM() bool {
 	return h.Status&StatusEOM != 0
 }
 
-// PayloadLength returns the number of payload bytes (Length - HeaderSize).
+// PayloadLength retorna o número de bytes de payload (Length - HeaderSize).
 func (h *Header) PayloadLength() int {
 	if int(h.Length) <= HeaderSize {
 		return 0
@@ -108,7 +108,7 @@ func (h *Header) PayloadLength() int {
 	return int(h.Length) - HeaderSize
 }
 
-// Marshal serializes the header to an 8-byte slice.
+// Marshal serializa o header em um slice de 8 bytes.
 func (h *Header) Marshal() []byte {
 	buf := make([]byte, HeaderSize)
 	buf[0] = byte(h.Type)
@@ -120,7 +120,7 @@ func (h *Header) Marshal() []byte {
 	return buf
 }
 
-// ReadHeader reads an 8-byte TDS header from the reader.
+// ReadHeader lê um header TDS de 8 bytes do reader.
 func ReadHeader(r io.Reader) (*Header, error) {
 	buf := make([]byte, HeaderSize)
 	if _, err := io.ReadFull(r, buf); err != nil {
@@ -129,7 +129,7 @@ func ReadHeader(r io.Reader) (*Header, error) {
 	return ParseHeader(buf)
 }
 
-// ParseHeader parses an 8-byte buffer into a Header.
+// ParseHeader parseia um buffer de 8 bytes em um Header.
 func ParseHeader(buf []byte) (*Header, error) {
 	if len(buf) < HeaderSize {
 		return nil, fmt.Errorf("tds header too short: %d bytes", len(buf))
@@ -151,8 +151,8 @@ func ParseHeader(buf []byte) (*Header, error) {
 	return h, nil
 }
 
-// ReadPacket reads a full TDS packet (header + payload) from the reader.
-// Returns the header and the full packet bytes (including header).
+// ReadPacket lê um pacote TDS completo (header + payload) do reader.
+// Retorna o header e os bytes completos do pacote (incluindo header).
 func ReadPacket(r io.Reader) (*Header, []byte, error) {
 	hdr, err := ReadHeader(r)
 	if err != nil {
@@ -172,8 +172,8 @@ func ReadPacket(r io.Reader) (*Header, []byte, error) {
 	return hdr, packet, nil
 }
 
-// ReadMessage reads a complete TDS message (one or more packets until EOM).
-// Returns the packet type, assembled payload (without headers), and all raw packets.
+// ReadMessage lê uma mensagem TDS completa (um ou mais pacotes até EOM).
+// Retorna o tipo de pacote, payload montado (sem headers), e todos os pacotes brutos.
 func ReadMessage(r io.Reader) (PacketType, []byte, [][]byte, error) {
 	var (
 		pktType  PacketType
@@ -204,7 +204,7 @@ func ReadMessage(r io.Reader) (PacketType, []byte, [][]byte, error) {
 	return pktType, payload, packets, nil
 }
 
-// WritePackets writes raw packet bytes to a writer.
+// WritePackets escreve bytes de pacotes brutos em um writer.
 func WritePackets(w io.Writer, packets [][]byte) error {
 	for _, pkt := range packets {
 		if _, err := w.Write(pkt); err != nil {
@@ -214,8 +214,8 @@ func WritePackets(w io.Writer, packets [][]byte) error {
 	return nil
 }
 
-// BuildPackets splits a payload into one or more TDS packets with proper headers.
-// packetSize is the maximum size of each packet (including header).
+// BuildPackets divide um payload em um ou mais pacotes TDS com headers adequados.
+// packetSize é o tamanho máximo de cada pacote (incluindo header).
 func BuildPackets(pktType PacketType, payload []byte, packetSize int) [][]byte {
 	if packetSize <= HeaderSize {
 		packetSize = 4096

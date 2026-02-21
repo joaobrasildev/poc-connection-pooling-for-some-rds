@@ -12,37 +12,37 @@ import (
 
 // ── Connection Router ───────────────────────────────────────────────────
 //
-// The router maps a Login7 packet to a destination bucket. Routing strategies:
+// O router mapeia um pacote Login7 para um bucket de destino. Estratégias de roteamento:
 //
-// 1. By database name   — Login7.Database → bucket with matching database
-// 2. By server name     — Login7.ServerName → bucket ID
-// 3. By username        — Login7.UserName → bucket with matching username
-// 4. First match wins   — fallback: if only one bucket exists, use it
+// 1. Por nome do banco   — Login7.Database → bucket com database correspondente
+// 2. Por nome do servidor — Login7.ServerName → ID do bucket
+// 3. Por nome de usuário  — Login7.UserName → bucket com username correspondente
+// 4. Primeiro match vence — fallback: se existir apenas um bucket, usá-lo
 //
-// For the POC, all buckets share the same database name ("tenant_db"), so
-// we use server name or username as alternative routing keys.
+// Para a POC, todos os buckets compartilham o mesmo nome de banco ("tenant_db"), então
+// usamos nome do servidor ou username como chaves de roteamento alternativas.
 
-// Router resolves a Login7 packet to a destination bucket.
+// Router resolve um pacote Login7 para um bucket de destino.
 type Router struct {
 	cfg *config.Config
 
-	// byDatabase maps database name → bucket (first match wins).
+	// byDatabase mapeia nome do banco → bucket (primeiro match vence).
 	byDatabase map[string]*bucket.Bucket
 
-	// byServerName maps server name alias → bucket.
+	// byServerName mapeia alias de nome do servidor → bucket.
 	byServerName map[string]*bucket.Bucket
 
-	// byHost maps host:port → bucket.
+	// byHost mapeia host:port → bucket.
 	byHost map[string]*bucket.Bucket
 
-	// byID maps bucket ID → bucket for direct lookup.
+	// byID mapeia ID do bucket → bucket para lookup direto.
 	byID map[string]*bucket.Bucket
 
-	// defaultBucket is used when there's only one bucket or no routing match.
+	// defaultBucket é usado quando há apenas um bucket ou nenhum match de roteamento.
 	defaultBucket *bucket.Bucket
 }
 
-// NewRouter creates a Router from the configuration.
+// NewRouter cria um Router a partir da configuração.
 func NewRouter(cfg *config.Config) *Router {
 	r := &Router{
 		cfg:          cfg,
@@ -52,22 +52,22 @@ func NewRouter(cfg *config.Config) *Router {
 		byID:         make(map[string]*bucket.Bucket),
 	}
 
-	// Build lookup maps.
-	seenDBs := make(map[string]int) // track duplicates
+	// Construir mapas de lookup.
+	seenDBs := make(map[string]int) // rastrear duplicatas
 	for i := range cfg.Buckets {
 		b := &cfg.Buckets[i]
 		r.byID[b.ID] = b
 		r.byHost[b.Addr()] = b
 		seenDBs[b.Database]++
 
-		// Map bucket ID as a server name alias (e.g., "bucket-001").
+		// Mapear ID do bucket como alias de nome de servidor (ex: "bucket-001").
 		r.byServerName[strings.ToLower(b.ID)] = b
 
-		// Also map the host as a server name alias.
+		// Também mapear o host como alias de nome de servidor.
 		r.byServerName[strings.ToLower(b.Host)] = b
 	}
 
-	// Only populate byDatabase if database names are unique across buckets.
+	// Só preencher byDatabase se nomes de banco forem únicos entre buckets.
 	for i := range cfg.Buckets {
 		b := &cfg.Buckets[i]
 		if seenDBs[b.Database] == 1 {
@@ -75,7 +75,7 @@ func NewRouter(cfg *config.Config) *Router {
 		}
 	}
 
-	// If there's only one bucket, set it as default.
+	// Se houver apenas um bucket, definir como padrão.
 	if len(cfg.Buckets) == 1 {
 		r.defaultBucket = &cfg.Buckets[0]
 	}
@@ -86,11 +86,11 @@ func NewRouter(cfg *config.Config) *Router {
 	return r
 }
 
-// Route resolves a Login7 packet to a destination bucket.
-// Returns the bucket and nil error, or nil and an error if no route found.
+// Route resolve um pacote Login7 para um bucket de destino.
+// Retorna o bucket e nil de erro, ou nil e um erro se nenhuma rota foi encontrada.
 func (r *Router) Route(login7 *tds.Login7Info) (*bucket.Bucket, error) {
-	// Strategy 1: Route by server name (most explicit).
-	// The client can set the server name to the bucket ID to route explicitly.
+	// Estratégia 1: Rotear por nome do servidor (mais explícito).
+	// O cliente pode definir o nome do servidor como o ID do bucket para rotear explicitamente.
 	if login7.ServerName != "" {
 		serverLower := strings.ToLower(login7.ServerName)
 		if b, ok := r.byServerName[serverLower]; ok {
@@ -98,14 +98,14 @@ func (r *Router) Route(login7 *tds.Login7Info) (*bucket.Bucket, error) {
 			return b, nil
 		}
 
-		// Try matching server name as bucket ID directly.
+		// Tentar fazer match do nome do servidor como ID do bucket diretamente.
 		if b, ok := r.byID[login7.ServerName]; ok {
 			log.Printf("[router] Routed by bucket ID %q → bucket %s", login7.ServerName, b.ID)
 			return b, nil
 		}
 	}
 
-	// Strategy 2: Route by database name (if unique).
+	// Estratégia 2: Rotear por nome do banco (se único).
 	if login7.Database != "" {
 		dbLower := strings.ToLower(login7.Database)
 		if b, ok := r.byDatabase[dbLower]; ok {
@@ -114,7 +114,7 @@ func (r *Router) Route(login7 *tds.Login7Info) (*bucket.Bucket, error) {
 		}
 	}
 
-	// Strategy 3: Route by username matching.
+	// Estratégia 3: Rotear por match de username.
 	if login7.UserName != "" {
 		for i := range r.cfg.Buckets {
 			b := &r.cfg.Buckets[i]
@@ -125,7 +125,7 @@ func (r *Router) Route(login7 *tds.Login7Info) (*bucket.Bucket, error) {
 		}
 	}
 
-	// Strategy 4: Default bucket (single-bucket setup).
+	// Estratégia 4: Bucket padrão (setup de bucket único).
 	if r.defaultBucket != nil {
 		log.Printf("[router] Routed to default bucket %s", r.defaultBucket.ID)
 		return r.defaultBucket, nil

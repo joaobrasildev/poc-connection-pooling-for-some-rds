@@ -1,10 +1,10 @@
-// Package queue provides distributed queue mechanisms for cross-instance
-// coordination of connection waiting. It wraps the coordinator's Pub/Sub
-// notifications and the distributed semaphore to provide a unified waiting
-// interface for the connection pool.
+// Package queue fornece mecanismos de fila distribuída para coordenação
+// cross-instance de espera por conexões. Encapsula as notificações Pub/Sub
+// do coordinator e o semáforo distribuído para fornecer uma interface
+// unificada de espera para o connection pool.
 //
-// Phase 4 additions: circuit breaker (max queue size), per-bucket metrics,
-// and graceful rejection with TDS error support.
+// Adições da Fase 4: circuit breaker (tamanho máximo da fila), métricas
+// por bucket e rejeição graciosa com suporte a erros TDS.
 package queue
 
 import (
@@ -18,23 +18,24 @@ import (
 	"github.com/joao-brasil/poc-connection-pooling/internal/metrics"
 )
 
-// DistributedQueue manages distributed wait queues for all buckets.
-// When a local pool is at global capacity, callers wait on the distributed
-// semaphore. When any proxy instance releases a connection, all waiting
-// instances are notified via Pub/Sub so one of them can acquire the slot.
+// DistributedQueue gerencia filas de espera distribuídas para todos os buckets.
+// Quando um pool local está na capacidade global, os chamadores esperam no
+// semáforo distribuído. Quando qualquer instância de proxy libera uma conexão,
+// todas as instâncias em espera são notificadas via Pub/Sub para que uma
+// delas possa adquirir o slot.
 type DistributedQueue struct {
 	coordinator *coordinator.RedisCoordinator
 	semaphore   *coordinator.Semaphore
 
-	// per-bucket queue depth tracking
+	// rastreamento de profundidade da fila por bucket
 	mu     sync.Mutex
 	depths map[string]int
 
-	timeout      time.Duration // max wait time per request
-	maxQueueSize int           // max queue depth per bucket (0 = unlimited)
+	timeout      time.Duration // tempo máximo de espera por requisição
+	maxQueueSize int           // profundidade máxima da fila por bucket (0 = ilimitado)
 }
 
-// NewDistributedQueue creates a new distributed queue backed by the coordinator.
+// NewDistributedQueue cria uma nova fila distribuída apoiada pelo coordinator.
 func NewDistributedQueue(rc *coordinator.RedisCoordinator, timeout time.Duration, maxQueueSize int) *DistributedQueue {
 	if timeout == 0 {
 		timeout = 30 * time.Second
@@ -49,24 +50,24 @@ func NewDistributedQueue(rc *coordinator.RedisCoordinator, timeout time.Duration
 	}
 }
 
-// Acquire tries to get a distributed slot for the given bucket.
-// It first attempts an immediate acquire. If that fails (bucket at capacity),
-// it checks the circuit breaker (max queue size) and enters the distributed
-// wait queue using the semaphore.
+// Acquire tenta obter um slot distribuído para o bucket fornecido.
+// Primeiro tenta uma aquisição imediata. Se falhar (bucket na capacidade),
+// verifica o circuit breaker (tamanho máximo da fila) e entra na fila
+// de espera distribuída usando o semáforo.
 //
-// Returns nil if a slot was acquired, or an error on timeout/cancellation/rejection.
-// The error type can be checked to determine the appropriate TDS error to send:
-//   - ErrQueueFull: circuit breaker triggered (queue at max capacity)
-//   - ErrQueueTimeout: waited but timed out
-//   - context.Canceled / context.DeadlineExceeded: client disconnected
+// Retorna nil se um slot foi adquirido, ou um erro em timeout/cancelamento/rejeição.
+// O tipo de erro pode ser verificado para determinar o erro TDS apropriado a enviar:
+//   - ErrQueueFull: circuit breaker disparado (fila na capacidade máxima)
+//   - ErrQueueTimeout: esperou mas esgotou o timeout
+//   - context.Canceled / context.DeadlineExceeded: cliente desconectou
 func (dq *DistributedQueue) Acquire(ctx context.Context, bucketID string) error {
-	// Fast path: try non-blocking acquire.
+	// Caminho rápido: tentar aquisição não-bloqueante.
 	if err := dq.semaphore.TryAcquire(ctx, bucketID); err == nil {
 		metrics.ConnectionsTotal.WithLabelValues(bucketID, "acquired").Inc()
 		return nil
 	}
 
-	// Circuit breaker: reject immediately if queue is already at max depth.
+	// Circuit breaker: rejeitar imediatamente se a fila já está na profundidade máxima.
 	if dq.maxQueueSize > 0 {
 		currentDepth := dq.getDepth(bucketID)
 		if currentDepth >= dq.maxQueueSize {
@@ -82,7 +83,7 @@ func (dq *DistributedQueue) Acquire(ctx context.Context, bucketID string) error 
 		}
 	}
 
-	// Slow path: enter distributed wait queue.
+	// Caminho lento: entrar na fila de espera distribuída.
 	dq.incrementDepth(bucketID)
 	defer dq.decrementDepth(bucketID)
 
@@ -94,7 +95,7 @@ func (dq *DistributedQueue) Acquire(ctx context.Context, bucketID string) error 
 	dur := time.Since(start)
 
 	if err != nil {
-		// Classify the error.
+		// Classificar o erro.
 		if ctx.Err() != nil {
 			metrics.ConnectionsTotal.WithLabelValues(bucketID, "cancelled").Inc()
 			log.Printf("[dqueue] Wait cancelled for bucket %s after %v: %v", bucketID, dur, err)
@@ -115,38 +116,38 @@ func (dq *DistributedQueue) Acquire(ctx context.Context, bucketID string) error 
 	return nil
 }
 
-// Release notifies the distributed queue that a connection was released.
-// This is handled internally by the coordinator's Lua script (PUBLISH).
-// Calling this method explicitly ensures the coordinator release is invoked.
+// Release notifica a fila distribuída que uma conexão foi liberada.
+// Isso é tratado internamente pelo script Lua do coordinator (PUBLISH).
+// Chamar este método explicitamente garante que o release do coordinator seja invocado.
 func (dq *DistributedQueue) Release(ctx context.Context, bucketID string) error {
 	return dq.coordinator.Release(ctx, bucketID)
 }
 
-// Depth returns the current distributed wait queue depth for a bucket.
+// Depth retorna a profundidade atual da fila de espera distribuída para um bucket.
 func (dq *DistributedQueue) Depth(bucketID string) int {
 	return dq.getDepth(bucketID)
 }
 
-// ── Queue Error Types ───────────────────────────────────────────────────
+// ── Tipos de Erro de Fila ─────────────────────────────────────────────
 
-// QueueErrorKind classifies the type of queue error.
+// QueueErrorKind classifica o tipo de erro de fila.
 type QueueErrorKind int
 
 const (
-	// QueueErrorTimeout means the request waited the full timeout period.
+	// QueueErrorTimeout significa que a requisição esperou o período completo de timeout.
 	QueueErrorTimeout QueueErrorKind = iota
-	// QueueErrorFull means the queue is at max capacity (circuit breaker).
+	// QueueErrorFull significa que a fila está na capacidade máxima (circuit breaker).
 	QueueErrorFull
 )
 
-// QueueError provides structured error information for queue failures.
+// QueueError fornece informações estruturadas de erro para falhas de fila.
 type QueueError struct {
 	BucketID string
 	Kind     QueueErrorKind
-	Depth    int           // current queue depth (for QueueErrorFull)
-	MaxSize  int           // max queue size (for QueueErrorFull)
-	WaitTime time.Duration // how long the request waited (for QueueErrorTimeout)
-	Timeout  time.Duration // configured timeout (for QueueErrorTimeout)
+	Depth    int           // profundidade atual da fila (para QueueErrorFull)
+	MaxSize  int           // tamanho máximo da fila (para QueueErrorFull)
+	WaitTime time.Duration // quanto tempo a requisição esperou (para QueueErrorTimeout)
+	Timeout  time.Duration // timeout configurado (para QueueErrorTimeout)
 }
 
 func (e *QueueError) Error() string {
@@ -162,7 +163,7 @@ func (e *QueueError) Error() string {
 	}
 }
 
-// IsQueueFull checks if the error is a circuit breaker rejection.
+// IsQueueFull verifica se o erro é uma rejeição do circuit breaker.
 func IsQueueFull(err error) bool {
 	if qe, ok := err.(*QueueError); ok {
 		return qe.Kind == QueueErrorFull
@@ -170,7 +171,7 @@ func IsQueueFull(err error) bool {
 	return false
 }
 
-// IsQueueTimeout checks if the error is a queue timeout.
+// IsQueueTimeout verifica se o erro é um timeout de fila.
 func IsQueueTimeout(err error) bool {
 	if qe, ok := err.(*QueueError); ok {
 		return qe.Kind == QueueErrorTimeout
@@ -178,7 +179,7 @@ func IsQueueTimeout(err error) bool {
 	return false
 }
 
-// ── Internal helpers ─────────────────────────────────────────────────────
+// ── Helpers internos ─────────────────────────────────────────────────────
 
 func (dq *DistributedQueue) incrementDepth(bucketID string) {
 	dq.mu.Lock()

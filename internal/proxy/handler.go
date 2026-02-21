@@ -20,22 +20,22 @@ import (
 
 // ── Session Handler ─────────────────────────────────────────────────────
 //
-// Transparent TDS proxy that forwards Pre-Login and TLS handshake
-// packets between client and backend, avoiding encryption mismatches.
+// Proxy TDS transparente que encaminha pacotes Pre-Login e TLS handshake
+// entre cliente e backend, evitando incompatibilidades de criptografia.
 //
-// Lifecycle:
-//   1. Accept TCP connection
-//   2. Read client Pre-Login → route to a bucket → connect to backend
-//   3. Forward Pre-Login to backend, relay response back to client
-//   4. Relay TLS handshake transparently (if encryption is required)
-//   5. Read Login7 (if unencrypted) for logging; otherwise relay opaquely
-//   6. Relay login response from backend to client
-//   7. Data phase: bidirectional packet relay with pinning detection
-//   8. On disconnect: release/discard connection
+// Ciclo de vida:
+//   1. Aceitar conexão TCP
+//   2. Ler Pre-Login do cliente → rotear para um bucket → conectar ao backend
+//   3. Encaminhar Pre-Login ao backend, retransmitir resposta ao cliente
+//   4. Retransmitir TLS handshake transparentemente (se criptografia for requerida)
+//   5. Ler Login7 (se não criptografado) para logging; caso contrário retransmitir opacamente
+//   6. Retransmitir resposta de login do backend ao cliente
+//   7. Fase de dados: relay bidirecional de pacotes com detecção de pinning
+//   8. Na desconexão: devolver/descartar conexão
 
 var sessionCounter atomic.Uint64
 
-// Session represents a single client connection session through the proxy.
+// Session representa uma sessão de conexão de um único cliente através do proxy.
 type Session struct {
 	id          uint64
 	clientConn  net.Conn
@@ -45,23 +45,23 @@ type Session struct {
 	dqueue      *queue.DistributedQueue
 	router      *Router
 
-	// Backend state.
+	// Estado do backend.
 	bucketID    string
 	backendConn net.Conn
 	poolConn    *pool.PooledConn
 
-	// Distributed coordination: whether we acquired a slot.
+	// Coordenação distribuída: se adquirimos um slot.
 	slotAcquired bool
 
-	// Pinning state.
+	// Estado de pinning.
 	pinned    bool
 	pinReason string
 
-	// Lifecycle tracking.
+	// Rastreamento do ciclo de vida.
 	startedAt time.Time
 }
 
-// newSession creates a new session for an incoming client connection.
+// newSession cria uma nova sessão para uma conexão de cliente recebida.
 func newSession(clientConn net.Conn, cfg *config.Config, poolMgr *pool.Manager, rc *coordinator.RedisCoordinator, dq *queue.DistributedQueue, router *Router) *Session {
 	return &Session{
 		id:          sessionCounter.Add(1),
@@ -75,7 +75,7 @@ func newSession(clientConn net.Conn, cfg *config.Config, poolMgr *pool.Manager, 
 	}
 }
 
-// Handle runs the full TDS session lifecycle.
+// Handle executa o ciclo de vida completo da sessão TDS.
 func (s *Session) Handle(ctx context.Context) {
 	defer s.cleanup()
 
@@ -87,7 +87,7 @@ func (s *Session) Handle(ctx context.Context) {
 		_ = s.clientConn.SetDeadline(deadline)
 	}
 
-	// ── Step 1: Read client Pre-Login ───────────────────────────────
+	// ── Passo 1: Ler Pre-Login do cliente ───────────────────────────
 	preLoginType, preLoginPayload, preLoginPackets, err := tds.ReadMessage(s.clientConn)
 	if err != nil {
 		log.Printf("[session:%d] Pre-Login read failed: %v", s.id, err)
@@ -104,9 +104,9 @@ func (s *Session) Handle(ctx context.Context) {
 	}
 	log.Printf("[session:%d] Pre-Login received, encryption=0x%02X", s.id, clientPL.Encryption())
 
-	// ── Step 2: Route to a bucket ───────────────────────────────────
-	// Pre-Login has no user/database info; pick the first bucket now.
-	// Future: route by client IP, SNI, or SSPI token.
+	// ── Passo 2: Rotear para um bucket ──────────────────────────────
+	// Pre-Login não tem info de user/database; escolher o primeiro bucket.
+	// Futuro: rotear por IP do cliente, SNI ou token SSPI.
 	target := s.pickBucket()
 	if target == nil {
 		log.Printf("[session:%d] No buckets configured", s.id)
@@ -114,7 +114,7 @@ func (s *Session) Handle(ctx context.Context) {
 	}
 	s.bucketID = target.ID
 
-	// ── Step 3: Acquire distributed slot (Phase 3 + Phase 4 queue) ─────
+	// ── Passo 3: Adquirir slot distribuído (Fase 3 + Fila da Fase 4) ────
 	if s.dqueue != nil {
 		if err := s.dqueue.Acquire(ctx, target.ID); err != nil {
 			log.Printf("[session:%d] Queue acquire failed for bucket %s: %v", s.id, target.ID, err)
@@ -133,7 +133,7 @@ func (s *Session) Handle(ctx context.Context) {
 		s.slotAcquired = true
 		log.Printf("[session:%d] Distributed slot acquired for bucket %s", s.id, target.ID)
 	} else if s.coordinator != nil {
-		// Fallback: use coordinator directly if no dqueue (shouldn't happen in normal flow)
+		// Fallback: usar coordinator diretamente se não houver dqueue (não deveria acontecer no fluxo normal)
 		if err := s.coordinator.Acquire(ctx, target.ID); err != nil {
 			log.Printf("[session:%d] Distributed acquire failed for bucket %s: %v", s.id, target.ID, err)
 			s.sendError(tds.ErrBackendUnavailable(target.ID))
@@ -159,13 +159,13 @@ func (s *Session) Handle(ctx context.Context) {
 	s.backendConn = backendConn
 	log.Printf("[session:%d] Connected to backend %s (bucket %s)", s.id, backendAddr, target.ID)
 
-	// ── Step 5: Forward Pre-Login to backend ────────────────────────
+	// ── Passo 5: Encaminhar Pre-Login ao backend ────────────────────
 	if err := tds.WritePackets(s.backendConn, preLoginPackets); err != nil {
 		log.Printf("[session:%d] Failed to forward Pre-Login: %v", s.id, err)
 		return
 	}
 
-	// ── Step 6: Read backend Pre-Login response, forward to client ──
+	// ── Passo 6: Ler resposta Pre-Login do backend, encaminhar ao cliente ──
 	_, _, respPackets, err := tds.ReadMessage(s.backendConn)
 	if err != nil {
 		log.Printf("[session:%d] Backend Pre-Login response failed: %v", s.id, err)
@@ -177,18 +177,18 @@ func (s *Session) Handle(ctx context.Context) {
 	}
 	log.Printf("[session:%d] Pre-Login handshake relayed", s.id)
 
-	// ── Step 7: Bidirectional TCP relay ─────────────────────────────
-	// After Pre-Login, the TLS handshake + Login7 + data phase all happen
-	// over the same TCP stream. Instead of trying to parse TDS packets
-	// during TLS (which wraps everything in opaque encrypted records),
-	// we do a raw TCP splice. This transparently handles:
+	// ── Passo 7: Relay TCP bidirecional ─────────────────────────────
+	// Após o Pre-Login, o TLS handshake + Login7 + fase de dados acontecem
+	// no mesmo stream TCP. Em vez de tentar parsear pacotes TDS
+	// durante TLS (que encapsula tudo em registros criptografados opacos),
+	// fazemos um splice TCP bruto. Isso trata transparentemente:
 	//   - TLS handshake (ClientHello, ServerHello, etc.)
-	//   - TLS-encrypted Login7
-	//   - Login response
-	//   - Data phase (queries, results)
+	//   - Login7 criptografado com TLS
+	//   - Resposta de login
+	//   - Fase de dados (queries, resultados)
 	//
-	// For pinning detection (Phase 3+), we will add TDS-aware parsing
-	// only in ENCRYPT_NOT_SUP mode where data is unencrypted.
+	// Para detecção de pinning (Fase 3+), adicionaremos parsing TDS-aware
+	// apenas no modo ENCRYPT_NOT_SUP onde os dados não são criptografados.
 	log.Printf("[session:%d] Starting bidirectional TCP relay", s.id)
 	metrics.ConnectionsActive.WithLabelValues(target.ID).Add(1)
 	defer metrics.ConnectionsActive.WithLabelValues(target.ID).Add(-1)
@@ -196,38 +196,38 @@ func (s *Session) Handle(ctx context.Context) {
 	s.tcpRelay()
 }
 
-// pickBucket selects a backend bucket for this session.
-// Since Pre-Login has no user/database info, we pick the first bucket
-// or could use round-robin. For the POC we just use bucket[0].
-// Once Login7 routing is needed pre-connection, we can add two-phase
-// routing (connect to a temp backend, read Login7, then re-route).
+// pickBucket seleciona um bucket backend para esta sessão.
+// Como o Pre-Login não tem info de user/database, pegamos o primeiro bucket
+// ou podemos usar round-robin. Para a POC usamos bucket[0].
+// Quando roteamento Login7 for necessário pré-conexão, podemos adicionar
+// roteamento em duas fases (conectar a um backend temporário, ler Login7, depois re-rotear).
 func (s *Session) pickBucket() *bucket.Bucket {
 	if len(s.cfg.Buckets) == 0 {
 		return nil
 	}
-	// Simple: use the first bucket. The Router is still available for
-	// Login7-based routing in future phases.
+	// Simples: usar o primeiro bucket. O Router ainda está disponível para
+	// roteamento baseado em Login7 em fases futuras.
 	b := &s.cfg.Buckets[0]
 	log.Printf("[session:%d] Picked bucket %s (default)", s.id, b.ID)
 	return b
 }
 
-// tcpRelay performs raw bidirectional TCP byte copying between client
-// and backend. This handles TLS, Login7, and the data phase transparently.
+// tcpRelay realiza cópia bruta bidirecional de bytes TCP entre cliente
+// e backend. Isso trata TLS, Login7 e a fase de dados transparentemente.
 func (s *Session) tcpRelay() {
 	done := make(chan struct{})
 
-	// Client → Backend
+	// Cliente → Backend
 	go func() {
 		_, _ = io.Copy(s.backendConn, s.clientConn)
-		// Signal the other direction by closing the write side.
+		// Sinalizar a outra direção fechando o lado de escrita.
 		if tc, ok := s.backendConn.(*net.TCPConn); ok {
 			tc.CloseWrite()
 		}
 		done <- struct{}{}
 	}()
 
-	// Backend → Client
+	// Backend → Cliente
 	go func() {
 		_, _ = io.Copy(s.clientConn, s.backendConn)
 		if tc, ok := s.clientConn.(*net.TCPConn); ok {
@@ -236,12 +236,12 @@ func (s *Session) tcpRelay() {
 		done <- struct{}{}
 	}()
 
-	// Wait for at least one direction to finish.
+	// Aguardar pelo menos uma direção terminar.
 	<-done
 	log.Printf("[session:%d] TCP relay ended", s.id)
 }
 
-// applyPinResult updates the session's pinning state.
+// applyPinResult atualiza o estado de pinning da sessão.
 func (s *Session) applyPinResult(result tds.PinResult) {
 	switch result.Action {
 	case tds.PinActionPin:
@@ -261,14 +261,14 @@ func (s *Session) applyPinResult(result tds.PinResult) {
 	}
 }
 
-// sendError sends a TDS error response to the client.
+// sendError envia uma resposta de erro TDS ao cliente.
 func (s *Session) sendError(errorPacket []byte) {
 	if _, err := s.clientConn.Write(errorPacket); err != nil {
 		log.Printf("[session:%d] Failed to send error to client: %v", s.id, err)
 	}
 }
 
-// cleanup closes all connections and releases pool resources.
+// cleanup fecha todas as conexões e libera recursos do pool.
 func (s *Session) cleanup() {
 	duration := time.Since(s.startedAt)
 	log.Printf("[session:%d] Session ended after %v (bucket=%s, pinned=%v)",
@@ -288,7 +288,7 @@ func (s *Session) cleanup() {
 		}
 	}
 
-	// Release distributed slot (Phase 3 + Phase 4).
+	// Liberar slot distribuído (Fase 3 + Fase 4).
 	if s.slotAcquired {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -306,7 +306,7 @@ func (s *Session) cleanup() {
 	}
 }
 
-// isConnectionClosed checks if an error indicates a closed connection.
+// isConnectionClosed verifica se um erro indica uma conexão fechada.
 func isConnectionClosed(err error) bool {
 	if err == nil {
 		return false

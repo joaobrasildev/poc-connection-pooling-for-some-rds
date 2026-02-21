@@ -9,32 +9,32 @@ import (
 	"github.com/joao-brasil/poc-connection-pooling/internal/metrics"
 )
 
-// ── Distributed Semaphore ───────────────────────────────────────────────
+// ── Semáforo Distribuído ─────────────────────────────────────────────
 //
-// The semaphore provides a distributed waiting mechanism for connection
-// acquisition. When the global pool for a bucket is full, callers wait
-// on the semaphore until a connection is released by any proxy instance.
+// O semáforo fornece um mecanismo de espera distribuído para aquisição
+// de conexões. Quando o pool global de um bucket está cheio, os chamadores
+// esperam no semáforo até que uma conexão seja liberada por qualquer instância de proxy.
 //
-// It combines:
-//   - Redis Pub/Sub for instant cross-instance notifications
-//   - Polling fallback to handle missed Pub/Sub messages
-//   - Timeout to prevent indefinite waiting
+// Ele combina:
+//   - Redis Pub/Sub para notificações instantâneas cross-instance
+//   - Fallback de polling para tratar mensagens Pub/Sub perdidas
+//   - Timeout para evitar espera indefinida
 
-// Semaphore provides distributed waiting for connection availability.
+// Semaphore fornece espera distribuída por disponibilidade de conexão.
 type Semaphore struct {
 	coordinator *RedisCoordinator
 }
 
-// NewSemaphore creates a new distributed semaphore.
+// NewSemaphore cria um novo semáforo distribuído.
 func NewSemaphore(rc *RedisCoordinator) *Semaphore {
 	return &Semaphore{coordinator: rc}
 }
 
-// Wait blocks until a connection slot becomes available for the given bucket,
-// then atomically acquires it. Returns an error if the context expires or
-// the wait times out.
+// Wait bloqueia até que um slot de conexão fique disponível para o bucket fornecido,
+// então o adquire atomicamente. Retorna um erro se o contexto expirar ou
+// o timeout de espera for atingido.
 func (s *Semaphore) Wait(ctx context.Context, bucketID string, timeout time.Duration) error {
-	// Fast path: try immediate acquire.
+	// Caminho rápido: tentar aquisição imediata.
 	if err := s.coordinator.Acquire(ctx, bucketID); err == nil {
 		return nil
 	}
@@ -42,18 +42,18 @@ func (s *Semaphore) Wait(ctx context.Context, bucketID string, timeout time.Dura
 	start := time.Now()
 	log.Printf("[semaphore] Waiting for connection slot on bucket %s (timeout=%s)", bucketID, timeout)
 
-	// Subscribe to release notifications for this bucket.
+	// Inscrever-se em notificações de liberação para este bucket.
 	notifyCh, err := s.coordinator.Subscribe(ctx, bucketID)
 	if err != nil {
-		// Can't subscribe — fall back to polling.
+		// Não conseguiu inscrever-se — fazer fallback para polling.
 		return s.waitPolling(ctx, bucketID, timeout)
 	}
 
-	// Set up timeout.
+	// Configurar timeout.
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
-	// Also poll periodically as a safety net (in case Pub/Sub messages are lost).
+	// Também fazer polling periodicamente como rede de segurança (caso mensagens Pub/Sub sejam perdidas).
 	pollTicker := time.NewTicker(500 * time.Millisecond)
 	defer pollTicker.Stop()
 
@@ -69,20 +69,20 @@ func (s *Semaphore) Wait(ctx context.Context, bucketID string, timeout time.Dura
 
 		case _, ok := <-notifyCh:
 			if !ok {
-				// Channel closed, switch to polling.
+				// Canal fechado, mudar para polling.
 				return s.waitPolling(ctx, bucketID, timeout-time.Since(start))
 			}
-			// A connection was released — try to acquire.
+			// Uma conexão foi liberada — tentar adquirir.
 			if err := s.coordinator.Acquire(ctx, bucketID); err == nil {
 				dur := time.Since(start)
 				metrics.QueueWaitDuration.WithLabelValues(bucketID).Observe(dur.Seconds())
 				log.Printf("[semaphore] Acquired slot on bucket %s after %v", bucketID, dur)
 				return nil
 			}
-			// Someone else got it first — keep waiting.
+			// Alguém pegou primeiro — continuar esperando.
 
 		case <-pollTicker.C:
-			// Periodic retry in case we missed a notification.
+			// Retry periódico caso tenhamos perdido uma notificação.
 			if err := s.coordinator.Acquire(ctx, bucketID); err == nil {
 				dur := time.Since(start)
 				metrics.QueueWaitDuration.WithLabelValues(bucketID).Observe(dur.Seconds())
@@ -93,7 +93,7 @@ func (s *Semaphore) Wait(ctx context.Context, bucketID string, timeout time.Dura
 	}
 }
 
-// waitPolling is a fallback that polls Redis for slot availability.
+// waitPolling é um fallback que faz polling no Redis por disponibilidade de slot.
 func (s *Semaphore) waitPolling(ctx context.Context, bucketID string, remaining time.Duration) error {
 	if remaining <= 0 {
 		return fmt.Errorf("semaphore timeout for bucket %s", bucketID)
@@ -123,7 +123,7 @@ func (s *Semaphore) waitPolling(ctx context.Context, bucketID string, remaining 
 	}
 }
 
-// TryAcquire attempts a single non-blocking acquire.
+// TryAcquire tenta uma única aquisição não-bloqueante.
 func (s *Semaphore) TryAcquire(ctx context.Context, bucketID string) error {
 	err := s.coordinator.Acquire(ctx, bucketID)
 	if err != nil {

@@ -1,6 +1,6 @@
-// Package pool provides the connection pool manager for SQL Server backend connections.
-// Each bucket has its own pool with configurable min_idle, max_connections, health checks,
-// and sp_reset_connection on release.
+// Package pool fornece o gerenciador de connection pool para conexões backend do SQL Server.
+// Cada bucket tem seu próprio pool com min_idle, max_connections, health checks
+// e sp_reset_connection no release configuráveis.
 package pool
 
 import (
@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// PinReason describes why a connection is pinned (not returnable to pool).
+// PinReason descreve por que uma conexão está pinada (não retornável ao pool).
 type PinReason string
 
 const (
@@ -19,52 +19,52 @@ const (
 	PinBulkLoad    PinReason = "bulk_load"
 )
 
-// ConnState represents the lifecycle state of a pooled connection.
+// ConnState representa o estado do ciclo de vida de uma conexão no pool.
 type ConnState int
 
 const (
-	ConnStateIdle   ConnState = iota // Available in pool
-	ConnStateActive                  // Acquired by a client
-	ConnStateClosed                  // Removed from pool
+	ConnStateIdle   ConnState = iota // Disponível no pool
+	ConnStateActive                  // Adquirida por um cliente
+	ConnStateClosed                  // Removida do pool
 )
 
-// PooledConn wraps a *sql.DB connection with metadata for pool management.
-// It is the unit managed by the BucketPool.
+// PooledConn encapsula uma conexão *sql.DB com metadados para gerenciamento de pool.
+// É a unidade gerenciada pelo BucketPool.
 type PooledConn struct {
 	mu sync.Mutex
 
-	// db is the underlying SQL Server connection (via go-mssqldb).
+	// db é a conexão SQL Server subjacente (via go-mssqldb).
 	db *sql.DB
 
-	// id is a unique identifier for this connection within the pool.
+	// id é um identificador único para esta conexão dentro do pool.
 	id uint64
 
-	// bucketID identifies which bucket this connection belongs to.
+	// bucketID identifica a qual bucket esta conexão pertence.
 	bucketID string
 
-	// state tracks the current lifecycle state.
+	// state rastreia o estado atual do ciclo de vida.
 	state ConnState
 
-	// pinReason is non-empty when the connection is pinned.
+	// pinReason é não-vazio quando a conexão está pinada.
 	pinReason PinReason
 
-	// pinnedAt is the time when the connection was pinned.
+	// pinnedAt é o momento em que a conexão foi pinada.
 	pinnedAt time.Time
 
-	// createdAt is the time the connection was established.
+	// createdAt é o momento em que a conexão foi estabelecida.
 	createdAt time.Time
 
-	// lastUsedAt is the last time the connection was acquired or returned.
+	// lastUsedAt é a última vez que a conexão foi adquirida ou devolvida.
 	lastUsedAt time.Time
 
-	// lastHealthCheck is the last time SELECT 1 was run on this connection.
+	// lastHealthCheck é a última vez que SELECT 1 foi executado nesta conexão.
 	lastHealthCheck time.Time
 
-	// useCount tracks how many times this connection was acquired.
+	// useCount rastreia quantas vezes esta conexão foi adquirida.
 	useCount uint64
 }
 
-// newPooledConn creates a new PooledConn wrapping a sql.DB.
+// newPooledConn cria uma nova PooledConn encapsulando um sql.DB.
 func newPooledConn(id uint64, bucketID string, db *sql.DB) *PooledConn {
 	now := time.Now()
 	return &PooledConn{
@@ -78,43 +78,43 @@ func newPooledConn(id uint64, bucketID string, db *sql.DB) *PooledConn {
 	}
 }
 
-// DB returns the underlying *sql.DB.
+// DB retorna o *sql.DB subjacente.
 func (c *PooledConn) DB() *sql.DB {
 	return c.db
 }
 
-// ID returns the connection's unique identifier.
+// ID retorna o identificador único da conexão.
 func (c *PooledConn) ID() uint64 {
 	return c.id
 }
 
-// BucketID returns the bucket this connection belongs to.
+// BucketID retorna o bucket ao qual esta conexão pertence.
 func (c *PooledConn) BucketID() string {
 	return c.bucketID
 }
 
-// State returns the current connection state.
+// State retorna o estado atual da conexão.
 func (c *PooledConn) State() ConnState {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.state
 }
 
-// IsPinned returns true if the connection is pinned.
+// IsPinned retorna true se a conexão estiver pinada.
 func (c *PooledConn) IsPinned() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.pinReason != PinNone
 }
 
-// PinReason returns the current pin reason.
+// PinReason retorna o motivo atual do pin.
 func (c *PooledConn) PinReason() PinReason {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.pinReason
 }
 
-// Pin marks the connection as pinned with the given reason.
+// Pin marca a conexão como pinada com o motivo especificado.
 func (c *PooledConn) Pin(reason PinReason) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -124,7 +124,7 @@ func (c *PooledConn) Pin(reason PinReason) {
 	c.pinReason = reason
 }
 
-// Unpin clears the pin reason. Returns the duration the connection was pinned.
+// Unpin limpa o motivo de pin. Retorna a duração em que a conexão ficou pinada.
 func (c *PooledConn) Unpin() time.Duration {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -137,7 +137,7 @@ func (c *PooledConn) Unpin() time.Duration {
 	return dur
 }
 
-// markAcquired transitions the connection to active state.
+// markAcquired transiciona a conexão para o estado ativo.
 func (c *PooledConn) markAcquired() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -146,7 +146,7 @@ func (c *PooledConn) markAcquired() {
 	c.useCount++
 }
 
-// markIdle transitions the connection back to idle state.
+// markIdle transiciona a conexão de volta para o estado idle.
 func (c *PooledConn) markIdle() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -154,21 +154,21 @@ func (c *PooledConn) markIdle() {
 	c.lastUsedAt = time.Now()
 }
 
-// markClosed transitions the connection to closed state.
+// markClosed transiciona a conexão para o estado fechado.
 func (c *PooledConn) markClosed() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.state = ConnStateClosed
 }
 
-// idleDuration returns how long the connection has been idle.
+// idleDuration retorna há quanto tempo a conexão está idle.
 func (c *PooledConn) idleDuration() time.Duration {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return time.Since(c.lastUsedAt)
 }
 
-// Close closes the underlying database connection.
+// Close fecha a conexão de banco de dados subjacente.
 func (c *PooledConn) Close() error {
 	c.markClosed()
 	return c.db.Close()

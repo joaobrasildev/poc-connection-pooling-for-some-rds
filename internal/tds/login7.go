@@ -6,13 +6,13 @@ import (
 	"unicode/utf16"
 )
 
-// ── Login7 Packet Parser (MS-TDS 2.2.6.4) ──────────────────────────────
+// ── Parser de Pacote Login7 (MS-TDS 2.2.6.4) ──────────────────────────────
 //
-// The Login7 packet contains authentication data and connection properties.
-// The proxy only needs to extract:
-//   - Database name   (for routing to the correct bucket)
-//   - Username        (for logging/metrics)
-//   - Server name     (for alternative routing)
+// O pacote Login7 contém dados de autenticação e propriedades de conexão.
+// O proxy só precisa extrair:
+//   - Nome do banco   (para roteamento ao bucket correto)
+//   - Username        (para logging/métricas)
+//   - Nome do servidor (para roteamento alternativo)
 //
 // Login7 layout (fixed header at offset 0 within the payload):
 //
@@ -45,35 +45,35 @@ import (
 //   Each (offset, length) is 2+2 bytes (uint16 LE), where offset is from
 //   the start of the Login7 data, and length is in characters (UTF-16 code units).
 
-// Login7Info holds extracted fields from a Login7 packet.
+// Login7Info contém campos extraídos de um pacote Login7.
 type Login7Info struct {
-	// TDSVersion extracted from Login7.
+	// TDSVersion extraída do Login7.
 	TDSVersion uint32
 
-	// Hostname of the client.
+	// Hostname do cliente.
 	HostName string
 
-	// Username for SQL Server authentication.
+	// Username para autenticação do SQL Server.
 	UserName string
 
-	// AppName is the client application name.
+	// AppName é o nome da aplicação cliente.
 	AppName string
 
-	// ServerName is the server name the client requested.
+	// ServerName é o nome do servidor que o cliente solicitou.
 	ServerName string
 
-	// Database is the initial database name — used for routing.
+	// Database é o nome do banco inicial — usado para roteamento.
 	Database string
 
-	// ClientInterfaceName is the client library name (e.g., "go-mssqldb").
+	// ClientInterfaceName é o nome da biblioteca cliente (ex: "go-mssqldb").
 	ClientInterfaceName string
 }
 
-// ParseLogin7 parses a Login7 payload (the bytes after the TDS header)
-// and extracts the fields the proxy needs for routing.
+// ParseLogin7 faz o parse de um payload Login7 (os bytes após o header TDS)
+// e extrai os campos que o proxy precisa para roteamento.
 func ParseLogin7(payload []byte) (*Login7Info, error) {
-	// Minimum Login7 size: 36 bytes fixed header + at least the offset/length
-	// pairs up to ibDatabase (offset 68 + 4 = 72 bytes).
+	// Tamanho mínimo do Login7: 36 bytes de header fixo + pelo menos os pares
+	// offset/length até ibDatabase (offset 68 + 4 = 72 bytes).
 	const minLogin7Size = 72
 
 	if len(payload) < minLogin7Size {
@@ -82,13 +82,13 @@ func ParseLogin7(payload []byte) (*Login7Info, error) {
 
 	info := &Login7Info{}
 
-	// Extract TDS Version (bytes 4-7, little-endian).
+	// Extrair TDS Version (bytes 4-7, little-endian).
 	info.TDSVersion = binary.LittleEndian.Uint32(payload[4:8])
 
-	// Extract variable-length fields using offset/length pairs.
-	// Each pair is: offset (uint16 LE at pos), length_in_chars (uint16 LE at pos+2).
+	// Extrair campos de comprimento variável usando pares offset/length.
+	// Cada par é: offset (uint16 LE na pos), length_in_chars (uint16 LE na pos+2).
 
-	// Helper to read a UTF-16 LE string from the payload.
+	// Helper para ler uma string UTF-16 LE do payload.
 	readField := func(offsetPos int) (string, error) {
 		if offsetPos+4 > len(payload) {
 			return "", fmt.Errorf("field descriptor at %d out of bounds", offsetPos)
@@ -100,7 +100,7 @@ func ParseLogin7(payload []byte) (*Login7Info, error) {
 			return "", nil
 		}
 
-		// Each character is 2 bytes (UTF-16 LE).
+		// Cada caractere tem 2 bytes (UTF-16 LE).
 		byteLen := cchField * 2
 		if ibField+byteLen > len(payload) {
 			return "", fmt.Errorf("field at offset %d, len %d chars overflows payload (%d bytes)",
@@ -122,7 +122,7 @@ func ParseLogin7(payload []byte) (*Login7Info, error) {
 		return nil, fmt.Errorf("login7 username: %w", err)
 	}
 
-	// Password at offset 44 — we don't need to decode it (it's XOR-obfuscated anyway).
+	// Password no offset 44 — não precisamos decodificá-la (está ofuscada com XOR).
 
 	info.AppName, err = readField(48)
 	if err != nil {
@@ -147,7 +147,7 @@ func ParseLogin7(payload []byte) (*Login7Info, error) {
 	return info, nil
 }
 
-// decodeUTF16LE decodes a UTF-16 little-endian byte slice to a Go string.
+// decodeUTF16LE decodifica um slice de bytes UTF-16 little-endian para uma string Go.
 func decodeUTF16LE(b []byte) (string, error) {
 	if len(b)%2 != 0 {
 		return "", fmt.Errorf("UTF-16 LE data has odd length %d", len(b))
@@ -161,7 +161,7 @@ func decodeUTF16LE(b []byte) (string, error) {
 	return string(utf16.Decode(u16)), nil
 }
 
-// encodeUTF16LE encodes a Go string to UTF-16 little-endian bytes.
+// encodeUTF16LE codifica uma string Go para bytes UTF-16 little-endian.
 func encodeUTF16LE(s string) []byte {
 	runes := []rune(s)
 	u16 := utf16.Encode(runes)

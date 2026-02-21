@@ -6,9 +6,9 @@ import (
 	"time"
 )
 
-// HealthCheck runs SELECT 1 on every idle connection in every pool,
-// discarding any that are unhealthy. This is called periodically
-// by the maintenance loop.
+// HealthCheck executa SELECT 1 em toda conexão idle de todos os pools,
+// descartando as que não estão saudáveis. Chamado periodicamente
+// pelo loop de manutenção.
 func (bp *BucketPool) HealthCheck() {
 	bp.mu.Lock()
 	conns := make([]*PooledConn, len(bp.idle))
@@ -40,7 +40,7 @@ func (bp *BucketPool) HealthCheck() {
 
 	if removed > 0 {
 		bp.mu.Lock()
-		// Rebuild idle list with only healthy connections.
+		// Reconstruir lista idle apenas com conexões saudáveis.
 		newIdle := make([]*PooledConn, 0, len(bp.idle))
 		healthySet := make(map[uint64]bool, len(healthy))
 		for _, c := range healthy {

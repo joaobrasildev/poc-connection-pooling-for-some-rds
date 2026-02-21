@@ -6,9 +6,9 @@ import (
 	"io"
 )
 
-// ── Pre-Login Token Types (MS-TDS 2.2.6.5) ──────────────────────────
+// ── Tipos de Token Pre-Login (MS-TDS 2.2.6.5) ──────────────────────────
 
-// PreLoginOptionToken identifies fields in a Pre-Login packet.
+// PreLoginOptionToken identifica campos em um pacote Pre-Login.
 type PreLoginOptionToken byte
 
 const (
@@ -23,7 +23,7 @@ const (
 	PreLoginTerminator PreLoginOptionToken = 0xFF
 )
 
-// Encryption options.
+// Opções de criptografia.
 const (
 	EncryptOff    byte = 0x00
 	EncryptOn     byte = 0x01
@@ -31,18 +31,18 @@ const (
 	EncryptReq    byte = 0x03
 )
 
-// PreLoginOption represents a single option in the Pre-Login packet.
+// PreLoginOption representa uma única opção no pacote Pre-Login.
 type PreLoginOption struct {
 	Token  PreLoginOptionToken
 	Data   []byte
 }
 
-// PreLoginMsg holds parsed Pre-Login options.
+// PreLoginMsg contém as opções Pre-Login parseadas.
 type PreLoginMsg struct {
 	Options []PreLoginOption
 }
 
-// ParsePreLogin parses the payload of a Pre-Login packet (without TDS header).
+// ParsePreLogin faz o parse do payload de um pacote Pre-Login (sem o header TDS).
 func ParsePreLogin(payload []byte) (*PreLoginMsg, error) {
 	if len(payload) < 1 {
 		return nil, fmt.Errorf("prelogin payload is empty")
@@ -50,7 +50,7 @@ func ParsePreLogin(payload []byte) (*PreLoginMsg, error) {
 
 	msg := &PreLoginMsg{}
 
-	// Phase 1: parse option headers (token, offset, length).
+	// Fase 1: parsear headers de opções (token, offset, length).
 	type optHeader struct {
 		token  PreLoginOptionToken
 		offset uint16
@@ -74,7 +74,7 @@ func ParsePreLogin(payload []byte) (*PreLoginMsg, error) {
 		pos += 5
 	}
 
-	// Phase 2: extract option data.
+	// Fase 2: extrair dados das opções.
 	for _, h := range headers {
 		end := int(h.offset) + int(h.length)
 		if end > len(payload) {
@@ -89,7 +89,7 @@ func ParsePreLogin(payload []byte) (*PreLoginMsg, error) {
 	return msg, nil
 }
 
-// Encryption returns the encryption flag from the Pre-Login options.
+// Encryption retorna a flag de criptografia das opções Pre-Login.
 func (m *PreLoginMsg) Encryption() byte {
 	for _, opt := range m.Options {
 		if opt.Token == PreLoginEncryption && len(opt.Data) > 0 {
@@ -99,7 +99,7 @@ func (m *PreLoginMsg) Encryption() byte {
 	return EncryptNotSup
 }
 
-// SetEncryption updates the encryption option in the Pre-Login message.
+// SetEncryption atualiza a opção de criptografia na mensagem Pre-Login.
 func (m *PreLoginMsg) SetEncryption(enc byte) {
 	for i, opt := range m.Options {
 		if opt.Token == PreLoginEncryption {
@@ -111,12 +111,12 @@ func (m *PreLoginMsg) SetEncryption(enc byte) {
 	}
 }
 
-// Marshal serializes the Pre-Login message back to bytes.
+// Marshal serializa a mensagem Pre-Login de volta para bytes.
 func (m *PreLoginMsg) Marshal() []byte {
-	// Calculate header size: 5 bytes per option + 1 byte terminator.
+	// Calcular tamanho do header: 5 bytes por opção + 1 byte terminador.
 	headerSize := len(m.Options)*5 + 1
 
-	// Calculate total size.
+	// Calcular tamanho total.
 	totalSize := headerSize
 	for _, opt := range m.Options {
 		totalSize += len(opt.Data)
@@ -124,7 +124,7 @@ func (m *PreLoginMsg) Marshal() []byte {
 
 	buf := make([]byte, totalSize)
 
-	// Write option headers.
+	// Escrever headers das opções.
 	dataOffset := headerSize
 	pos := 0
 	for _, opt := range m.Options {
@@ -140,12 +140,12 @@ func (m *PreLoginMsg) Marshal() []byte {
 	return buf
 }
 
-// BuildPreLoginResponse creates a minimal Pre-Login response payload.
-// The proxy responds with the same version and ENCRYPT_NOT_SUP for the POC.
+// BuildPreLoginResponse cria um payload mínimo de resposta Pre-Login.
+// O proxy responde com a mesma versão e ENCRYPT_NOT_SUP para a POC.
 func BuildPreLoginResponse(clientPreLogin *PreLoginMsg) []byte {
 	resp := &PreLoginMsg{}
 
-	// Copy version from client or use a default.
+	// Copiar versão do cliente ou usar um valor padrão.
 	var versionData []byte
 	for _, opt := range clientPreLogin.Options {
 		if opt.Token == PreLoginVersion {
@@ -155,25 +155,25 @@ func BuildPreLoginResponse(clientPreLogin *PreLoginMsg) []byte {
 		}
 	}
 	if versionData == nil {
-		// SQL Server 2022 version: 16.0.4236
+		// Versão do SQL Server 2022: 16.0.4236
 		versionData = []byte{0x10, 0x00, 0x10, 0x8C, 0x00, 0x00}
 	}
 	resp.Options = append(resp.Options, PreLoginOption{Token: PreLoginVersion, Data: versionData})
 
-	// Respond with encryption off for POC.
+	// Responder com criptografia desativada para a POC.
 	resp.Options = append(resp.Options, PreLoginOption{Token: PreLoginEncryption, Data: []byte{EncryptNotSup}})
 
-	// MARS disabled.
+	// MARS desativado.
 	resp.Options = append(resp.Options, PreLoginOption{Token: PreLoginMARS, Data: []byte{0x00}})
 
 	return resp.Marshal()
 }
 
-// ForwardPreLogin reads a Pre-Login message from the client, forwards it to
-// the backend, reads the backend response, and sends it back to the client.
-// Returns the parsed client PreLogin for inspection.
+// ForwardPreLogin lê uma mensagem Pre-Login do cliente, encaminha ao
+// backend, lê a resposta do backend e a envia de volta ao cliente.
+// Retorna o PreLogin do cliente parseado para inspeção.
 func ForwardPreLogin(client io.ReadWriter, backend io.ReadWriter) (*PreLoginMsg, error) {
-	// Read Pre-Login from client.
+	// Ler Pre-Login do cliente.
 	pktType, payload, _, err := ReadMessage(client)
 	if err != nil {
 		return nil, fmt.Errorf("reading client prelogin: %w", err)
@@ -187,20 +187,20 @@ func ForwardPreLogin(client io.ReadWriter, backend io.ReadWriter) (*PreLoginMsg,
 		return nil, fmt.Errorf("parsing client prelogin: %w", err)
 	}
 
-	// Forward Pre-Login to backend.
+	// Encaminhar Pre-Login ao backend.
 	fwdPackets := BuildPackets(PacketPreLogin, payload, 4096)
 	if err := WritePackets(backend, fwdPackets); err != nil {
 		return nil, fmt.Errorf("forwarding prelogin to backend: %w", err)
 	}
 
-	// Read Pre-Login response from backend.
+	// Ler resposta Pre-Login do backend.
 	respType, _, respPackets, err := ReadMessage(backend)
 	if err != nil {
 		return nil, fmt.Errorf("reading backend prelogin response: %w", err)
 	}
-	_ = respType // Pre-Login response is type 0x04 (Reply)
+	_ = respType // Resposta Pre-Login é tipo 0x04 (Reply)
 
-	// Forward backend response to client.
+	// Encaminhar resposta do backend ao cliente.
 	if err := WritePackets(client, respPackets); err != nil {
 		return nil, fmt.Errorf("forwarding prelogin response to client: %w", err)
 	}

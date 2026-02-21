@@ -6,20 +6,20 @@ import (
 	"sync"
 )
 
-// ── Bidirectional TDS Relay ─────────────────────────────────────────────
+// ── Relay TDS Bidirecional ───────────────────────────────────────────
 //
-// The relay copies TDS packets between client and server in both directions.
-// It also inspects packets for connection pinning state changes.
+// O relay copia pacotes TDS entre cliente e servidor em ambas as direções.
+// Também inspeciona pacotes para mudanças de estado de pinning de conexão.
 
-// PacketCallback is called for every TDS packet relayed.
-// direction is "client_to_server" or "server_to_client".
-// Return an error to abort the relay.
+// PacketCallback é chamado para cada pacote TDS retransmitido.
+// direction é "client_to_server" ou "server_to_client".
+// Retorne um erro para abortar o relay.
 type PacketCallback func(direction string, pktType PacketType, payload []byte) error
 
-// Relay performs bidirectional TDS packet relay between client and backend.
-// It runs until either side closes the connection or an error occurs.
-// The callback is invoked for every packet for pinning inspection.
-// Returns the first error that caused the relay to stop.
+// Relay realiza relay bidirecional de pacotes TDS entre cliente e backend.
+// Executa até que um dos lados feche a conexão ou ocorra um erro.
+// O callback é invocado para cada pacote para inspeção de pinning.
+// Retorna o primeiro erro que causou a parada do relay.
 func Relay(client io.ReadWriter, backend io.ReadWriter, callback PacketCallback) error {
 	var (
 		once    sync.Once
@@ -34,13 +34,13 @@ func Relay(client io.ReadWriter, backend io.ReadWriter, callback PacketCallback)
 		})
 	}
 
-	// Client → Server
+	// Cliente → Servidor
 	go func() {
 		err := relayDirection(client, backend, "client_to_server", callback)
 		setResult(err)
 	}()
 
-	// Server → Client
+	// Servidor → Cliente
 	go func() {
 		err := relayDirection(backend, client, "server_to_client", callback)
 		setResult(err)
@@ -50,16 +50,16 @@ func Relay(client io.ReadWriter, backend io.ReadWriter, callback PacketCallback)
 	return result
 }
 
-// relayDirection copies TDS packets from src to dst in one direction.
+// relayDirection copia pacotes TDS de src para dst em uma direção.
 func relayDirection(src io.Reader, dst io.Writer, direction string, callback PacketCallback) error {
 	for {
-		// Read one full TDS packet.
+		// Ler um pacote TDS completo.
 		hdr, pkt, err := ReadPacket(src)
 		if err != nil {
 			return err
 		}
 
-		// Invoke callback for pinning inspection.
+		// Invocar callback para inspeção de pinning.
 		if callback != nil {
 			payload := pkt[HeaderSize:]
 			if err := callback(direction, hdr.Type, payload); err != nil {
@@ -67,16 +67,16 @@ func relayDirection(src io.Reader, dst io.Writer, direction string, callback Pac
 			}
 		}
 
-		// Forward packet to destination.
+		// Encaminhar pacote ao destino.
 		if _, err := dst.Write(pkt); err != nil {
 			return err
 		}
 	}
 }
 
-// RelayMessage reads a complete TDS message (all packets until EOM) from src,
-// forwards all packets to dst, and returns the assembled payload and packet type.
-// This is used during the login phase where we need to read full messages.
+// RelayMessage lê uma mensagem TDS completa (todos os pacotes até EOM) de src,
+// encaminha todos os pacotes para dst, e retorna o payload montado e o tipo de pacote.
+// Usado durante a fase de login onde precisamos ler mensagens completas.
 func RelayMessage(src io.Reader, dst io.Writer) (PacketType, []byte, error) {
 	pktType, payload, packets, err := ReadMessage(src)
 	if err != nil {
@@ -90,8 +90,8 @@ func RelayMessage(src io.Reader, dst io.Writer) (PacketType, []byte, error) {
 	return pktType, payload, nil
 }
 
-// RelayUntilEOM reads packets from src and forwards them to dst until an
-// EOM (End of Message) packet is received. Returns all packets forwarded.
+// RelayUntilEOM lê pacotes de src e os encaminha para dst até que um
+// pacote EOM (End of Message) seja recebido. Retorna todos os pacotes encaminhados.
 func RelayUntilEOM(src io.Reader, dst io.Writer) ([][]byte, error) {
 	var packets [][]byte
 
@@ -115,8 +115,8 @@ func RelayUntilEOM(src io.Reader, dst io.Writer) ([][]byte, error) {
 	return packets, nil
 }
 
-// DrainResponse reads and discards a complete TDS response message from the reader.
-// Used when the proxy needs to consume a response without forwarding it.
+// DrainResponse lê e descarta uma mensagem de resposta TDS completa do reader.
+// Usado quando o proxy precisa consumir uma resposta sem encaminhá-la.
 func DrainResponse(r io.Reader) error {
 	for {
 		hdr, _, err := ReadPacket(r)
@@ -129,8 +129,8 @@ func DrainResponse(r io.Reader) error {
 	}
 }
 
-// ForwardLogin7 reads a Login7 message from the client, parses it for routing,
-// and forwards it to the backend. Returns the parsed Login7Info.
+// ForwardLogin7 lê uma mensagem Login7 do cliente, faz o parse para roteamento,
+// e a encaminha ao backend. Retorna o Login7Info parseado.
 func ForwardLogin7(client io.Reader, backend io.Writer) (*Login7Info, error) {
 	pktType, payload, packets, err := ReadMessage(client)
 	if err != nil {
@@ -153,7 +153,7 @@ func ForwardLogin7(client io.Reader, backend io.Writer) (*Login7Info, error) {
 	log.Printf("[tds] Login7: user=%q, database=%q, server=%q, app=%q",
 		login7.UserName, login7.Database, login7.ServerName, login7.AppName)
 
-	// Forward the Login7 to backend.
+	// Encaminhar o Login7 ao backend.
 	if err := WritePackets(backend, packets); err != nil {
 		return nil, err
 	}
@@ -161,7 +161,7 @@ func ForwardLogin7(client io.Reader, backend io.Writer) (*Login7Info, error) {
 	return login7, nil
 }
 
-// ProtocolError represents a TDS protocol violation.
+// ProtocolError representa uma violação do protocolo TDS.
 type ProtocolError struct {
 	Message string
 	Got     PacketType

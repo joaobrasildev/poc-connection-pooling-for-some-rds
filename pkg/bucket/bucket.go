@@ -1,10 +1,10 @@
-// Package bucket defines the bucket model and configuration structures.
-// A bucket represents a logical grouping of tenants mapped to a single RDS SQL Server instance.
+// Package bucket define o modelo de bucket e estruturas de configuração.
+// Um bucket representa um agrupamento lógico de tenants mapeado para uma única instância RDS SQL Server.
 package bucket
 
 import "time"
 
-// Bucket represents a logical bucket mapped to a single SQL Server RDS instance.
+// Bucket representa um bucket lógico mapeado para uma única instância RDS SQL Server.
 type Bucket struct {
 	ID               string        `yaml:"id"`
 	Host             string        `yaml:"host"`
@@ -19,7 +19,7 @@ type Bucket struct {
 	QueueTimeout     time.Duration `yaml:"queue_timeout"`
 }
 
-// DSN returns the SQL Server connection string for this bucket.
+// DSN retorna a string de conexão do SQL Server para este bucket.
 func (b *Bucket) DSN() string {
 	return "sqlserver://" + b.Username + ":" + b.Password +
 		"@" + b.Host + ":" + itoa(b.Port) +
@@ -27,12 +27,12 @@ func (b *Bucket) DSN() string {
 		"&connection+timeout=" + itoa(int(b.ConnectionTimeout.Seconds()))
 }
 
-// Addr returns the host:port address of the SQL Server instance.
+// Addr retorna o endereço host:port da instância SQL Server.
 func (b *Bucket) Addr() string {
 	return b.Host + ":" + itoa(b.Port)
 }
 
-// itoa converts an integer to string without importing strconv at package level.
+// itoa converte um inteiro para string sem importar strconv no nível do pacote.
 func itoa(n int) string {
 	if n == 0 {
 		return "0"

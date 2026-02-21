@@ -1,5 +1,5 @@
-// Package main is the entrypoint for the load generator.
-// This will simulate coreVMs connecting to the proxy via TDS (Phase 6).
+// Package main é o ponto de entrada para o gerador de carga.
+// Irá simular coreVMs conectando ao proxy via TDS (Fase 6).
 package main
 
 import (

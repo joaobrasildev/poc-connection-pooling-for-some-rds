@@ -10,8 +10,8 @@ import (
 	"github.com/joao-brasil/poc-connection-pooling/internal/metrics"
 )
 
-// Heartbeat periodically refreshes this instance's presence in Redis
-// and detects/cleans up dead instances whose connections were not released.
+// Heartbeat atualiza periodicamente a presença desta instância no Redis
+// e detecta/limpa instâncias mortas cujas conexões não foram liberadas.
 type Heartbeat struct {
 	coordinator *RedisCoordinator
 	interval    time.Duration
@@ -19,7 +19,7 @@ type Heartbeat struct {
 	stopCh      chan struct{}
 }
 
-// NewHeartbeat creates a heartbeat worker for the given coordinator.
+// NewHeartbeat cria um worker de heartbeat para o coordinator fornecido.
 func NewHeartbeat(rc *RedisCoordinator) *Heartbeat {
 	interval := rc.cfg.Redis.HeartbeatInterval
 	if interval == 0 {
@@ -38,7 +38,7 @@ func NewHeartbeat(rc *RedisCoordinator) *Heartbeat {
 	}
 }
 
-// Start begins the heartbeat loop in a background goroutine.
+// Start inicia o loop de heartbeat em uma goroutine em background.
 func (hb *Heartbeat) Start(ctx context.Context) {
 	hb.coordinator.wg.Add(1)
 	go hb.loop(ctx)
@@ -46,22 +46,22 @@ func (hb *Heartbeat) Start(ctx context.Context) {
 		hb.interval, hb.ttl, hb.coordinator.instanceID)
 }
 
-// Stop signals the heartbeat loop to stop.
+// Stop sinaliza para o loop de heartbeat parar.
 func (hb *Heartbeat) Stop() {
 	close(hb.stopCh)
 }
 
-// loop runs the periodic heartbeat and dead-instance cleanup.
+// loop executa o heartbeat periódico e a limpeza de instâncias mortas.
 func (hb *Heartbeat) loop(ctx context.Context) {
 	defer hb.coordinator.wg.Done()
 
-	// Send initial heartbeat immediately.
+	// Enviar heartbeat inicial imediatamente.
 	hb.sendHeartbeat(ctx)
 
 	ticker := time.NewTicker(hb.interval)
 	defer ticker.Stop()
 
-	// Run cleanup less frequently (every 3 intervals).
+	// Executar limpeza com menos frequência (a cada 3 intervalos).
 	cleanupCounter := 0
 
 	for {
@@ -72,7 +72,7 @@ func (hb *Heartbeat) loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if hb.coordinator.IsFallback() {
-				// Try to reconnect to Redis.
+				// Tentar reconectar ao Redis.
 				if err := hb.coordinator.ExitFallback(ctx); err != nil {
 					continue
 				}
@@ -88,7 +88,7 @@ func (hb *Heartbeat) loop(ctx context.Context) {
 	}
 }
 
-// sendHeartbeat refreshes this instance's heartbeat key with a TTL.
+// sendHeartbeat atualiza a chave de heartbeat desta instância com um TTL.
 func (hb *Heartbeat) sendHeartbeat(ctx context.Context) {
 	if hb.coordinator.IsFallback() {
 		return
@@ -106,14 +106,14 @@ func (hb *Heartbeat) sendHeartbeat(ctx context.Context) {
 	metrics.RedisOperations.WithLabelValues("heartbeat", "ok").Inc()
 }
 
-// cleanupDeadInstances checks for instances whose heartbeat has expired
-// and reconciles their orphaned connection counts.
+// cleanupDeadInstances verifica instâncias cujo heartbeat expirou
+// e reconcilia suas contagens de conexões órfãs.
 func (hb *Heartbeat) cleanupDeadInstances(ctx context.Context) {
 	if hb.coordinator.IsFallback() {
 		return
 	}
 
-	// Get all registered instances.
+	// Obter todas as instâncias registradas.
 	instances, err := hb.coordinator.client.SMembers(ctx, keyInstanceList).Result()
 	if err != nil {
 		log.Printf("[heartbeat] Failed to list instances: %v", err)
@@ -122,10 +122,10 @@ func (hb *Heartbeat) cleanupDeadInstances(ctx context.Context) {
 
 	for _, instID := range instances {
 		if instID == hb.coordinator.instanceID {
-			continue // skip ourselves
+			continue // pular nós mesmos
 		}
 
-		// Check if the instance's heartbeat is still alive.
+		// Verificar se o heartbeat da instância ainda está vivo.
 		hbKey := fmt.Sprintf(keyInstanceHB, instID)
 		exists, err := hb.coordinator.client.Exists(ctx, hbKey).Result()
 		if err != nil {
@@ -133,27 +133,27 @@ func (hb *Heartbeat) cleanupDeadInstances(ctx context.Context) {
 		}
 
 		if exists > 0 {
-			continue // instance is alive
+			continue // instância está viva
 		}
 
-		// Instance is dead — clean up its orphaned connections.
+		// Instância está morta — limpar suas conexões órfãs.
 		log.Printf("[heartbeat] Instance %s appears dead (no heartbeat), cleaning up", instID)
 		hb.cleanupInstance(ctx, instID)
 	}
 }
 
-// cleanupInstance removes an instance's connection counts from the global totals.
+// cleanupInstance remove as contagens de conexões de uma instância dos totais globais.
 func (hb *Heartbeat) cleanupInstance(ctx context.Context, deadInstanceID string) {
 	instKey := fmt.Sprintf(keyInstanceConn, deadInstanceID)
 
-	// Read the dead instance's per-bucket connection counts.
+	// Ler as contagens de conexões por bucket da instância morta.
 	counts, err := hb.coordinator.client.HGetAll(ctx, instKey).Result()
 	if err != nil {
 		log.Printf("[heartbeat] Failed to read counts for dead instance %s: %v", deadInstanceID, err)
 		return
 	}
 
-	// Subtract the dead instance's counts from global counters.
+	// Subtrair as contagens da instância morta dos contadores globais.
 	pipe := hb.coordinator.client.Pipeline()
 	totalRecovered := 0
 
@@ -168,7 +168,7 @@ func (hb *Heartbeat) cleanupInstance(ctx context.Context, deadInstanceID string)
 		totalRecovered += count
 	}
 
-	// Remove the dead instance's data.
+	// Remover os dados da instância morta.
 	pipe.Del(ctx, instKey)
 	pipe.SRem(ctx, keyInstanceList, deadInstanceID)
 
@@ -184,7 +184,7 @@ func (hb *Heartbeat) cleanupInstance(ctx context.Context, deadInstanceID string)
 		metrics.ConnectionErrors.WithLabelValues("coordinator", "dead_instance_cleanup").Inc()
 	}
 
-	// Ensure global counts don't go below zero.
+	// Garantir que contagens globais não fiquem abaixo de zero.
 	for bucketID := range counts {
 		countKey := fmt.Sprintf(keyBucketCount, bucketID)
 		val, err := hb.coordinator.client.Get(ctx, countKey).Int64()
